@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-parchment-100 text-ink min-h-screen;
+    font-family: 'Georgia', 'Times New Roman', serif;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: 'Georgia', serif;
+  }
+}
+
+@layer components {
+  .wiki-link {
+    @apply text-amber-700 underline decoration-dotted hover:text-amber-900 hover:decoration-solid cursor-pointer;
+  }
+
+  .wiki-link-missing {
+    @apply text-red-400 underline decoration-dotted cursor-not-allowed;
+  }
+
+  .sidebar-item {
+    @apply px-3 py-1.5 rounded text-sm cursor-pointer hover:bg-parchment-200 transition-colors;
+  }
+
+  .sidebar-item-active {
+    @apply bg-parchment-300 font-semibold;
+  }
+}
+
+/* Markdown content styles */
+.wiki-content h2 {
+  @apply text-xl font-bold mt-6 mb-2 border-b border-parchment-300 pb-1;
+}
+
+.wiki-content h3 {
+  @apply text-lg font-semibold mt-4 mb-1;
+}
+
+.wiki-content p {
+  @apply mb-3 leading-relaxed;
+}
+
+.wiki-content ul, .wiki-content ol {
+  @apply ml-5 mb-3;
+}
+
+.wiki-content li {
+  @apply mb-1;
+}
+
+.wiki-content ul {
+  @apply list-disc;
+}
+
+.wiki-content ol {
+  @apply list-decimal;
+}

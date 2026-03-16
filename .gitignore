@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+*.db
+
+# Node
+node_modules/
+dist/
+.cache/
+
+# Data
+data/
+epubs/
+*.epub
+
+# Env
+.env
+.env.local
