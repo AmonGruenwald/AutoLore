@@ -1,13 +1,25 @@
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, ForeignKey,
-    DateTime, JSON, Boolean, Float
+    DateTime, JSON, Boolean, Float, event
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 import os
 
 DB_PATH = os.environ.get("DB_PATH", "./autolore.db")
-engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
+engine = create_engine(
+    f"sqlite:///{DB_PATH}",
+    connect_args={
+        "check_same_thread": False,
+        "timeout": 30,  # wait up to 30s before giving up on a lock
+    },
+)
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(conn, _):
+    conn.execute("PRAGMA journal_mode=WAL")   # concurrent reads during writes
+    conn.execute("PRAGMA synchronous=NORMAL") # safe + faster than FULL with WAL
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
