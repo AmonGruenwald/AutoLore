@@ -273,10 +273,17 @@ export default function ChapterSelection() {
                     )}
                   </div>
                   <p className="text-xs text-ink-muted mt-0.5 leading-relaxed">
-                    {chapter.one_sentence_summary ?? (
+                    {chapter.one_sentence_summary == null ? (
                       <span className="flex items-center gap-1">
                         <Loader2 size={10} className="animate-spin" /> Generating preview…
                       </span>
+                    ) : (
+                      <details className="group/spoiler">
+                        <summary className="cursor-pointer select-none list-none text-ink-muted hover:text-ink">
+                          <span className="underline decoration-dotted">Show summary</span>
+                        </summary>
+                        <span className="mt-0.5 block">{chapter.one_sentence_summary}</span>
+                      </details>
                     )}
                   </p>
                 </div>
