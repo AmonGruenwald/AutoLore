@@ -50,8 +50,15 @@ def _extract_chapter_title(text: str, fallback: str) -> str:
 
 
 def parse_epub(file_bytes: bytes) -> ParsedBook:
-    import io
-    book = epub.read_epub(io.BytesIO(file_bytes))
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+    try:
+        book = epub.read_epub(tmp_path)
+    finally:
+        import os
+        os.unlink(tmp_path)
 
     title = book.get_metadata("DC", "title")
     title = title[0][0] if title else "Unknown Title"
