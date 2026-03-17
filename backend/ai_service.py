@@ -148,6 +148,7 @@ async def generate_chapter_summary(
     chapter: dict,
     previous_summaries: list[dict],
     known_entities: dict[str, dict] | None = None,
+    skipped_chapters: list[dict] | None = None,
 ) -> dict:
     """
     Returns:
@@ -157,6 +158,8 @@ async def generate_chapter_summary(
         "entities": [{"type": "character|place|event", "name": "...", "slug": "..."}]
       }
     known_entities: unused — kept for API compatibility.
+    skipped_chapters: chapters excluded by the user that fall between the previous
+      wiki chapter and this one; included so the AI doesn't misattribute their events.
     """
     prev_context = ""
     if previous_summaries:
@@ -165,8 +168,21 @@ async def generate_chapter_summary(
             for s in previous_summaries[-5:]
         )
 
-    prompt = f"""{prev_context}
+    skipped_context = ""
+    if skipped_chapters:
+        skipped_context = (
+            "\nNote: the following chapters from the original book were excluded from "
+            "this wiki by the user (they exist in the source but are not included). "
+            "Their events may be referenced in the current chapter's text — acknowledge "
+            "them briefly as prior context but do NOT write a wiki entry for them:\n"
+            + "\n".join(
+                f"- (Excluded) \"{s['title']}\": {s['summary']}"
+                for s in skipped_chapters
+            )
+            + "\n"
+        )
 
+    prompt = f"""{prev_context}{skipped_context}
 Current chapter text to summarize:
 {chapter['raw_text']}
 

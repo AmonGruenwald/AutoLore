@@ -252,6 +252,19 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
         previous_summaries = _get_previous_summaries(db, book_id)
         entity_info = _get_entity_info(db, book_id)
 
+        # Chapters from the original book that were excluded by the user and fall
+        # between the previous story chapter and this one.  Their events may be
+        # referenced in the current chapter's text, so we tell the AI about them
+        # so it doesn't attribute those events to the wrong chapter.
+        prev_original_number = story_chapters[next_idx - 1].number if next_idx > 0 else 0
+        skipped_between = [
+            {"number": c.number, "title": c.title, "summary": c.one_sentence_summary}
+            for c in all_chapters
+            if not c.is_story_chapter
+            and c.one_sentence_summary
+            and prev_original_number < c.number < chapter.number
+        ]
+
         chapter_dict = {
             "number": chapter.number,
             "title": chapter.title,
@@ -265,6 +278,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             result = await generate_chapter_summary(
                 api_key, model, chapter_dict, previous_summaries,
                 known_entities=entity_info if entity_info else None,
+                skipped_chapters=skipped_between if skipped_between else None,
             )
         except Exception as e:
             book.generation_status = "error"
