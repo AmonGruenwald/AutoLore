@@ -43,12 +43,6 @@ async def _call_openrouter(
         return resp.json()["choices"][0]["message"]["content"]
 
 
-def _build_chapter_context(chapters: list[dict]) -> str:
-    parts = []
-    for ch in chapters:
-        parts.append(f"=== {ch['title']} (Chapter {ch['number']}) ===\n{ch['raw_text']}")
-    return "\n\n".join(parts)
-
 
 async def generate_chapter_summary(
     api_key: str,
@@ -82,13 +76,16 @@ Instructions:
   [[Character:Name]], [[Place:Name]], [[Event:Name]]
 - Use the exact name as it appears in the text.
 - After the summary, output a JSON block listing all entities you linked to.
+- For each entity set "significance" to "major" if they have an active role, dialogue,
+  revealed attributes, or their situation changes in this chapter.
+  Set it to "minor" if they are only named in passing with no new information.
 
 Output format:
 <summary>
 [your summary markdown here]
 </summary>
 <entities>
-[{{"type": "character", "name": "ExactName"}}, ...]
+[{{"type": "character", "name": "ExactName", "significance": "major"}}, ...]
 </entities>"""
 
     messages = [
@@ -116,6 +113,7 @@ def _parse_summary_response(raw: str, chapter_number: int) -> dict:
                         "type": e["type"].lower(),
                         "name": e["name"],
                         "slug": _slugify(e["type"] + "-" + e["name"]),
+                        "significance": e.get("significance", "major").lower(),
                     })
         except json.JSONDecodeError:
             pass
@@ -128,35 +126,49 @@ async def generate_entity_page(
     model: str,
     entity_name: str,
     entity_type: str,
-    chapters_with_entity: list[dict],
+    chapter_summary: str,
+    chapter_number: int,
     existing_content: str = "",
 ) -> str:
     """
-    Generate/update an entity wiki page based only on the provided chapters.
+    Incrementally update an entity wiki page using only the current chapter summary
+    and the existing page content.  No raw chapter text is sent.
     Returns updated markdown content with [[Type:Name]] links.
     """
-    chapter_context = _build_chapter_context(chapters_with_entity)
-    existing_section = ""
-    if existing_content:
-        existing_section = f"\nExisting wiki page content (from previous chapters):\n{existing_content}\n"
-
     type_instructions = {
-        "character": "physical description, personality, relationships, role in the story, notable actions",
-        "place": "physical description, atmosphere, significance to the story, who visits or lives there",
+        "character": "physical description, personality, relationships, role in story, notable actions",
+        "place": "physical description, atmosphere, significance, who visits or lives there",
         "event": "what happened, who was involved, causes, consequences, timeline position",
     }.get(entity_type, "all relevant details")
 
-    prompt = f"""You are updating the wiki page for {entity_type.upper()}: "{entity_name}".
-{existing_section}
-Source text (only use information from here):
-{chapter_context}
+    if existing_content:
+        prompt = f"""Update the wiki page for {entity_type.upper()}: "{entity_name}".
 
-Write a complete wiki page for "{entity_name}" covering: {type_instructions}.
-- Only include information explicitly stated in the text.
+Existing page:
+{existing_content}
+
+New information from Chapter {chapter_number} summary:
+{chapter_summary}
+
+Instructions:
+- Incorporate any new information from this chapter into the existing page.
+- Only add details explicitly stated in the chapter summary above.
+- Keep all existing accurate information; do not remove it.
 - Use [[Character:Name]], [[Place:Name]], [[Event:Name]] syntax for cross-references.
 - Use markdown formatting (## headings, bullet lists where appropriate).
-- Do not include a top-level title (it will be added by the UI).
-- Do not speculate or add information not in the text."""
+- Do not include a top-level title.
+- Output the complete updated page."""
+    else:
+        prompt = f"""Create a wiki page for {entity_type.upper()}: "{entity_name}".
+
+Source — Chapter {chapter_number} summary:
+{chapter_summary}
+
+Write a wiki page covering: {type_instructions}.
+- Only include information explicitly stated above.
+- Use [[Character:Name]], [[Place:Name]], [[Event:Name]] syntax for cross-references.
+- Use markdown formatting (## headings, bullet lists where appropriate).
+- Do not include a top-level title."""
 
     messages = [
         {"role": "system", "content": GROUNDING_SYSTEM},

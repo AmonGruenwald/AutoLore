@@ -67,10 +67,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
         api_key, model = await _get_settings(db)
         chapters = db.query(Chapter).filter_by(book_id=book_id).order_by(Chapter.number).all()
 
-        # Track which entities have been mentioned and in which chapters
-        # entity_chapters: slug -> list of chapter dicts (for context)
-        entity_chapters: dict[str, list[dict]] = {}
-        # entity_info: slug -> {type, name}
+        # entity_info: slug -> {type, name} — tracks entity identity across chapters
         entity_info: dict[str, dict] = {}
 
         previous_summaries = []
@@ -101,60 +98,76 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             # Create/update summary page version
             summary_page = _get_or_create_wiki_page(db, book_id, "summary", chapter.title)
             links = resolve_links(summary_md)
-            version = WikiPageVersion(
+            db.add(WikiPageVersion(
                 page_id=summary_page.id,
                 first_visible_chapter=chapter.number,
                 content_markdown=summary_md,
                 outgoing_links=links,
-            )
-            db.add(version)
+            ))
 
-            # Track entities appearing in this chapter
+            # Track entity type/name for any new slugs seen
             for entity in entities_in_chapter:
                 slug = entity["slug"]
                 if slug not in entity_info:
                     entity_info[slug] = {"type": entity["type"], "name": entity["name"]}
-                if slug not in entity_chapters:
-                    entity_chapters[slug] = []
-                entity_chapters[slug].append(chapter_dict)
 
             db.commit()
 
-            previous_summaries.append({
-                "number": chapter.number,
-                "summary": summary_md,
-            })
+            previous_summaries.append({"number": chapter.number, "summary": summary_md})
 
-            # 2. Update entity pages for entities seen in this chapter
+            # 2. Determine which entities need a page update this chapter.
+            #    Always update on first appearance; skip "minor" mentions after that.
+            entities_to_update = []
             for entity in entities_in_chapter:
                 slug = entity["slug"]
                 info = entity_info[slug]
-                existing_page = _get_or_create_wiki_page(db, book_id, info["type"], info["name"])
-                existing_content = _latest_version_content(existing_page)
+                page = _get_or_create_wiki_page(db, book_id, info["type"], info["name"])
+                is_first_appearance = not page.versions
+                if is_first_appearance or entity.get("significance") == "major":
+                    entities_to_update.append({
+                        "info": info,
+                        "page": page,
+                        "existing_content": _latest_version_content(page),
+                    })
 
-                book.generation_step = f'Updating {info["type"]} page: "{info["name"]}"'
+            db.commit()  # flush any new WikiPage rows before async section
+
+            if entities_to_update:
+                n = len(entities_to_update)
+                book.generation_step = f'Updating {n} entit{"y" if n == 1 else "ies"} for chapter {chapter.number}…'
                 db.commit()
-                try:
-                    new_content = await generate_entity_page(
-                        api_key,
-                        model,
-                        info["name"],
-                        info["type"],
-                        entity_chapters[slug],
-                        existing_content,
-                    )
-                except Exception as e:
-                    # Non-fatal: skip this entity update
-                    continue
 
-                links = resolve_links(new_content)
-                entity_version = WikiPageVersion(
-                    page_id=existing_page.id,
-                    first_visible_chapter=chapter.number,
-                    content_markdown=new_content,
-                    outgoing_links=links,
-                )
-                db.add(entity_version)
+                # 3. Run all entity AI calls in parallel (cap concurrency to avoid rate limits)
+                semaphore = asyncio.Semaphore(6)
+
+                async def _call_update(task: dict) -> str | Exception:
+                    async with semaphore:
+                        try:
+                            return await generate_entity_page(
+                                api_key,
+                                model,
+                                task["info"]["name"],
+                                task["info"]["type"],
+                                summary_md,
+                                chapter.number,
+                                task["existing_content"],
+                            )
+                        except Exception as exc:
+                            return exc
+
+                results = await asyncio.gather(*[_call_update(t) for t in entities_to_update])
+
+                # 4. Write results to DB sequentially
+                for task, new_content in zip(entities_to_update, results):
+                    if isinstance(new_content, Exception):
+                        continue
+                    links = resolve_links(new_content)
+                    db.add(WikiPageVersion(
+                        page_id=task["page"].id,
+                        first_visible_chapter=chapter.number,
+                        content_markdown=new_content,
+                        outgoing_links=links,
+                    ))
                 db.commit()
 
             book.generation_progress = chapter.number
