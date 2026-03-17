@@ -211,7 +211,8 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
         db.commit()
         try:
             result = await generate_chapter_summary(
-                api_key, model, chapter_dict, previous_summaries
+                api_key, model, chapter_dict, previous_summaries,
+                known_entities=entity_info if entity_info else None,
             )
         except Exception as e:
             book.generation_status = "error"

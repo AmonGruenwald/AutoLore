@@ -88,6 +88,7 @@ async def generate_chapter_summary(
     model: str,
     chapter: dict,
     previous_summaries: list[dict],
+    known_entities: dict[str, dict] | None = None,
 ) -> dict:
     """
     Returns:
@@ -96,6 +97,7 @@ async def generate_chapter_summary(
         "summary": "markdown text with [[Type:Name]] links",
         "entities": [{"type": "character|place|event", "name": "...", "slug": "..."}]
       }
+    known_entities: slug -> {"type": ..., "name": ...} from previously processed chapters.
     """
     prev_context = ""
     if previous_summaries:
@@ -104,7 +106,22 @@ async def generate_chapter_summary(
             for s in previous_summaries[-5:]
         )
 
+    known_context = ""
+    if known_entities:
+        by_type: dict[str, list[str]] = {}
+        for info in known_entities.values():
+            by_type.setdefault(info["type"], []).append(info["name"])
+        lines = []
+        for t, names in sorted(by_type.items()):
+            lines.append(f"{t.capitalize()}s: {', '.join(sorted(names))}")
+        known_context = (
+            "Known entities from previous chapters (use these EXACT names when the same "
+            "entity appears — even if the text uses a nickname, short name, or alias):\n"
+            + "\n".join(lines)
+        )
+
     prompt = f"""{prev_context}
+{known_context}
 
 Current chapter text to summarize:
 {chapter['raw_text']}
@@ -114,7 +131,9 @@ Instructions:
 - Only include information from the text above.
 - When mentioning a character, place, or important event, use wiki-link syntax:
   [[Character:Name]], [[Place:Name]], [[Event:Name]]
-- Use the exact name as it appears in the text.
+- If an entity matches a known entity listed above, use the known canonical name exactly,
+  even if the chapter text uses a shorter name, nickname, or alias.
+- For brand-new entities not in the known list, use the most complete name from the text.
 - After the summary, output a JSON block listing all entities you linked to.
 - For each entity set "significance" to "major" if they have an active role, dialogue,
   revealed attributes, or their situation changes in this chapter.
