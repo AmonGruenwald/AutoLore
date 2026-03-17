@@ -99,6 +99,60 @@ def _is_faulty_title(title: str, story_chapter_idx: int) -> bool:
     return False
 
 
+def _find_canonical(name: str, entity_type: str, entity_info: dict) -> tuple[str, str] | None:
+    """
+    Check whether `name` is an unambiguous partial reference to a known entity
+    of the same type (e.g. "Paran" → "Ganoes Paran").
+
+    Rules:
+    - The word-set of `name` must be a proper subset of the word-set of exactly
+      ONE existing entity of the same type.
+    - If two entities both match (e.g. "Ganoes Paran" AND "Tavore Paran" both
+      contain "Paran"), the reference is ambiguous → no merge.
+
+    Returns (canonical_slug, canonical_name) or None.
+    """
+    name_words = set(name.lower().split())
+    if not name_words:
+        return None
+    matches = []
+    for slug, info in entity_info.items():
+        if info["type"] != entity_type:
+            continue
+        existing_words = set(info["name"].lower().split())
+        if name_words < existing_words:          # strict subset → partial name
+            matches.append((slug, info["name"]))
+    return matches[0] if len(matches) == 1 else None
+
+
+def _normalize_entities(
+    entities: list[dict], summary_md: str, entity_info: dict
+) -> tuple[list[dict], str]:
+    """
+    For each entity the AI returned whose slug isn't already known, try to
+    resolve it as an alias of a known entity.  Only merges when unambiguous.
+    Also patches the markdown so [[Type:Alias]] becomes [[Type:CanonicalName]].
+    """
+    updated = []
+    md = summary_md
+    for entity in entities:
+        if entity["slug"] in entity_info:
+            updated.append(entity)
+            continue
+        match = _find_canonical(entity["name"], entity["type"], entity_info)
+        if match:
+            canonical_slug, canonical_name = match
+            type_cap = entity["type"].capitalize()
+            md = md.replace(
+                f"[[{type_cap}:{entity['name']}]]",
+                f"[[{type_cap}:{canonical_name}]]",
+            )
+            updated.append({**entity, "slug": canonical_slug, "name": canonical_name})
+        else:
+            updated.append(entity)
+    return updated, md
+
+
 def _get_previous_summaries(db: Session, book_id: int) -> list[dict]:
     """Reconstruct previous_summaries from all stored summary wiki pages."""
     summary_pages = db.query(WikiPage).filter_by(book_id=book_id, page_type="summary").all()
@@ -225,6 +279,12 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
         ai_title = result.get("clean_title")
         story_chapter_idx = next_idx + 1  # 1-based story chapter number (used for all versioning)
         clean_title = (ai_title or chapter.title) if _is_faulty_title(chapter.title, story_chapter_idx) else chapter.title
+
+        # Resolve aliases: merge entities the AI named differently (e.g. "Paran"
+        # → "Ganoes Paran") when the match is unambiguous, and patch the markdown.
+        entities_in_chapter, summary_md = _normalize_entities(
+            entities_in_chapter, summary_md, entity_info
+        )
 
         # Persist the AI-generated title on the chapter row
         chapter.clean_title = clean_title
