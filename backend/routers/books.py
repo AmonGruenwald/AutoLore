@@ -1,4 +1,3 @@
-import asyncio
 import os
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -210,8 +209,8 @@ async def regenerate_wiki(
     return {"ok": True}
 
 
-def _run_generation(book_id: int):
-    asyncio.run(build_wiki_for_book(book_id, _db_factory))
+async def _run_generation(book_id: int):
+    await build_wiki_for_book(book_id, _db_factory)
 
 
 # --- Series endpoints ---
