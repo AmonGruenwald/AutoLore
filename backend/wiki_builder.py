@@ -53,6 +53,22 @@ def _latest_version_content(page: WikiPage) -> str:
     return max(page.versions, key=lambda v: v.first_visible_chapter).content_markdown
 
 
+_GENERIC_TITLE_RE = re.compile(
+    r"^(chapter|part|book|prologue|epilogue|interlude|section|volume|act)\s*[\divxlcdmIVXLCDM]*\.?\s*$",
+    re.IGNORECASE,
+)
+
+def _is_generic_title(title: str) -> bool:
+    """Return True if the epub chapter title is too generic to be useful."""
+    t = title.strip()
+    if not t or len(t) < 3:
+        return True
+    # Pure number or roman numeral
+    if re.match(r"^[\divxlcdmIVXLCDM\s\.]+$", t):
+        return True
+    return bool(_GENERIC_TITLE_RE.match(t))
+
+
 def _get_previous_summaries(db: Session, book_id: int) -> list[dict]:
     """Reconstruct previous_summaries from all stored summary wiki pages."""
     summary_pages = db.query(WikiPage).filter_by(book_id=book_id, page_type="summary").all()
@@ -175,7 +191,8 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
 
         summary_md = result["summary"]
         entities_in_chapter = result["entities"]
-        clean_title = result.get("clean_title") or chapter.title
+        ai_title = result.get("clean_title")
+        clean_title = ai_title if (ai_title and _is_generic_title(chapter.title)) else chapter.title
 
         # Persist the AI-generated title on the chapter row
         chapter.clean_title = clean_title

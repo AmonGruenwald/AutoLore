@@ -55,6 +55,7 @@ export default function WikiPage({ page, onNavigate, visibleSlugs }: Props) {
       <div className="wiki-content prose prose-stone max-w-none">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
+          urlTransform={(url) => url}
           components={{
             a({ href, children }) {
               if (href?.startsWith('wiki:')) {
