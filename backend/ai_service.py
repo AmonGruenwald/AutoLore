@@ -1,4 +1,5 @@
 """OpenRouter API interactions with strict grounding."""
+import asyncio
 import httpx
 import json
 import re
@@ -44,63 +45,60 @@ async def _call_openrouter(
 
 
 
+async def _classify_single_chapter(
+    api_key: str,
+    model: str,
+    chapter: dict,
+    semaphore: asyncio.Semaphore,
+) -> bool:
+    """Classify a single chapter as story (True) or supplementary (False)."""
+    prompt = f"""You are deciding whether a book chapter is part of the story or is supplementary material.
+
+Chapter title: {chapter['title']}
+Opening text: {chapter['preview']}
+
+Supplementary material (answer false): author biographical notes, acknowledgements, dedications,
+publisher/series announcements, glossary, appendix, bibliography, copyright, "about the author" pages.
+These refer to the real author or real-world publishing details.
+
+Story content (answer true): narrative prose with fictional characters, dialogue, events, or worldbuilding.
+Prologues, epilogues, and interludes with narrative content are story.
+
+CRITICAL: Base your answer on the OPENING TEXT above, not the title.
+If the opening text refers to "the author" as a real person, describes their education or other books
+they wrote, or lists upcoming publications — answer false, regardless of how the title sounds.
+
+Answer with only the single word: true or false"""
+
+    async with semaphore:
+        try:
+            raw = await _call_openrouter(
+                api_key, model,
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            return raw.strip().lower().startswith("true")
+        except Exception:
+            return True  # default to story on error
+
+
 async def classify_story_chapters(
     api_key: str,
     model: str,
     chapters: list[dict],
 ) -> list[bool]:
     """
-    Given a list of chapter dicts with 'number', 'title', and 'preview' (first ~200 chars),
-    returns a list of booleans — True if the chapter is part of the story, False if it is
-    supplementary material (author bios, acknowledgements, glossary, appendix, maps, etc.).
+    Given a list of chapter dicts with 'number', 'title', and 'preview',
+    returns a list of booleans — True if the chapter is part of the story, False if
+    supplementary (author bios, acknowledgements, glossary, appendix, etc.).
+
+    Each chapter is classified in its own focused call, run in parallel.
     """
-    chapter_list = "\n".join(
-        f"{i+1}. [{c['title']}] {c['preview']}"
-        for i, c in enumerate(chapters)
+    semaphore = asyncio.Semaphore(8)
+    results = await asyncio.gather(
+        *[_classify_single_chapter(api_key, model, c, semaphore) for c in chapters]
     )
-    prompt = f"""Below is a numbered list of ALL {len(chapters)} chapters from a book.
-Each entry shows the chapter title and its opening text.
-
-{chapter_list}
-
-Classify each chapter as story content (true) or supplementary material (false).
-
-SUPPLEMENTARY (false) — look at the OPENING TEXT, not just the title:
-- Author bio / "about the author": mentions the author's real life, education, other books they wrote
-- Acknowledgements, dedications: thanks readers, family, editors
-- Publisher/series notes: lists other books in the series, upcoming releases, publisher info
-- Glossary, appendix, bibliography, maps list, endnotes, copyright page
-- Any text that refers to "the author" in third person describing their real-world life
-
-STORY (true): narrative prose with characters, dialogue, events, worldbuilding — regardless of title.
-Prologues, epilogues, interludes, and unnumbered chapters count as story if they have narrative content.
-
-WARNING: A chapter can have an epic-sounding title but still be supplementary (e.g. a publisher
-page titled "The Opening of the Book of the Fallen" that actually describes the author's biography).
-Judge by the OPENING TEXT content, not the title alone.
-
-IMPORTANT: You MUST output exactly {len(chapters)} booleans — one per chapter in order.
-Respond with ONLY a JSON array of booleans. Example for 4 chapters: [true, true, false, true]"""
-
-    raw = await _call_openrouter(api_key, model, [{"role": "user", "content": prompt}], temperature=0.0)
-    match = re.search(r'\[[\s\S]*?\]', raw)
-    if not match:
-        return [True] * len(chapters)
-    try:
-        result = json.loads(match.group())
-        if len(result) == len(chapters):
-            return [bool(v) for v in result]
-    except Exception:
-        pass
-    # Length mismatch or parse error — try to salvage by padding/truncating
-    try:
-        result = json.loads(match.group())
-        if len(result) > len(chapters):
-            return [bool(v) for v in result[:len(chapters)]]
-        # Too short: assume the model omitted trailing story chapters
-        return [bool(v) for v in result] + [True] * (len(chapters) - len(result))
-    except Exception:
-        return [True] * len(chapters)
+    return list(results)
 
 
 async def generate_chapter_summary(
