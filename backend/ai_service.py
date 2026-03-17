@@ -223,6 +223,76 @@ Write a wiki page covering: {type_instructions}.
     return await _call_openrouter(api_key, model, messages)
 
 
+async def resolve_entity_aliases(
+    api_key: str,
+    model: str,
+    new_entities: list[dict],
+    known_entities: dict[str, dict],
+    chapter_summary: str,
+) -> dict[str, str | None]:
+    """
+    Given entities the AI found in a chapter that don't yet exist in the wiki,
+    determine which (if any) are aliases/nicknames for already-known entities.
+
+    Returns a dict mapping each new entity name to its canonical known name,
+    or None if it is genuinely new.  Only unambiguous matches are returned.
+    """
+    if not new_entities or not known_entities:
+        return {}
+
+    by_type: dict[str, list[str]] = {}
+    for info in known_entities.values():
+        by_type.setdefault(info["type"], []).append(info["name"])
+
+    known_lines = "\n".join(
+        f"{t.capitalize()}s: {', '.join(sorted(names))}"
+        for t, names in sorted(by_type.items())
+    )
+
+    new_lines = "\n".join(
+        f"- {e['type'].capitalize()}: {e['name']}" for e in new_entities
+    )
+
+    prompt = f"""You are resolving entity aliases while building a book wiki.
+
+Chapter summary (use this for context clues):
+{chapter_summary}
+
+Already-known entities:
+{known_lines}
+
+Newly mentioned entities (not yet in the wiki):
+{new_lines}
+
+Task: For each new entity, decide whether it is clearly the same as a known entity
+(e.g. a nickname, short name, title, or alias) or a genuinely new entity.
+
+Rules:
+- Only mark as an alias when you are confident from the summary context.
+- If the match is ambiguous or unclear, treat it as new (null).
+- A character sharing only a common word (e.g. "the Guard") is NOT an alias.
+
+Respond with ONLY valid JSON — an object mapping each new entity name to the
+canonical known name (string) or null if it is new:
+{{"Name1": "Canonical Name", "Name2": null, ...}}"""
+
+    messages = [
+        {"role": "system", "content": "You are a precise JSON-only responder."},
+        {"role": "user", "content": prompt},
+    ]
+    raw = await _call_openrouter(api_key, model, messages)
+    # Strip markdown fences if present
+    raw = re.sub(r"^```[a-z]*\n?", "", raw.strip(), flags=re.MULTILINE)
+    raw = re.sub(r"\n?```$", "", raw.strip(), flags=re.MULTILINE)
+    try:
+        result = json.loads(raw.strip())
+        if isinstance(result, dict):
+            return {k: v for k, v in result.items() if isinstance(k, str)}
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return {}
+
+
 async def check_duplicate_book(
     api_key: str,
     model: str,

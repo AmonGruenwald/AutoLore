@@ -11,7 +11,7 @@ import asyncio
 import re
 from sqlalchemy.orm import Session
 from database import Book, Chapter, WikiPage, WikiPageVersion, Setting
-from ai_service import classify_story_chapters, generate_chapter_summary, generate_entity_page, _slugify
+from ai_service import classify_story_chapters, generate_chapter_summary, generate_entity_page, resolve_entity_aliases, _slugify
 
 
 async def _get_settings(db: Session) -> tuple[str, str]:
@@ -99,49 +99,23 @@ def _is_faulty_title(title: str, story_chapter_idx: int) -> bool:
     return False
 
 
-def _find_canonical(name: str, entity_type: str, entity_info: dict) -> tuple[str, str] | None:
-    """
-    Check whether `name` is an unambiguous partial reference to a known entity
-    of the same type (e.g. "Paran" → "Ganoes Paran").
-
-    Rules:
-    - The word-set of `name` must be a proper subset of the word-set of exactly
-      ONE existing entity of the same type.
-    - If two entities both match (e.g. "Ganoes Paran" AND "Tavore Paran" both
-      contain "Paran"), the reference is ambiguous → no merge.
-
-    Returns (canonical_slug, canonical_name) or None.
-    """
-    name_words = set(name.lower().split())
-    if not name_words:
-        return None
-    matches = []
-    for slug, info in entity_info.items():
-        if info["type"] != entity_type:
-            continue
-        existing_words = set(info["name"].lower().split())
-        if name_words < existing_words:          # strict subset → partial name
-            matches.append((slug, info["name"]))
-    return matches[0] if len(matches) == 1 else None
-
-
-def _normalize_entities(
-    entities: list[dict], summary_md: str, entity_info: dict
+def _apply_alias_map(
+    entities: list[dict], summary_md: str, alias_map: dict[str, str | None], entity_info: dict
 ) -> tuple[list[dict], str]:
     """
-    For each entity the AI returned whose slug isn't already known, try to
-    resolve it as an alias of a known entity.  Only merges when unambiguous.
-    Also patches the markdown so [[Type:Alias]] becomes [[Type:CanonicalName]].
+    Apply an alias_map (new_name → canonical_name | None) to the entity list
+    and summary markdown.
     """
     updated = []
     md = summary_md
     for entity in entities:
-        if entity["slug"] in entity_info:
-            updated.append(entity)
-            continue
-        match = _find_canonical(entity["name"], entity["type"], entity_info)
-        if match:
-            canonical_slug, canonical_name = match
+        canonical_name = alias_map.get(entity["name"])
+        if canonical_name:
+            # Find the slug for this canonical name
+            canonical_slug = next(
+                (s for s, info in entity_info.items() if info["name"] == canonical_name),
+                _slugify(entity["type"] + "-" + canonical_name),
+            )
             type_cap = entity["type"].capitalize()
             md = md.replace(
                 f"[[{type_cap}:{entity['name']}]]",
@@ -280,11 +254,20 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
         story_chapter_idx = next_idx + 1  # 1-based story chapter number (used for all versioning)
         clean_title = (ai_title or chapter.title) if _is_faulty_title(chapter.title, story_chapter_idx) else chapter.title
 
-        # Resolve aliases: merge entities the AI named differently (e.g. "Paran"
-        # → "Ganoes Paran") when the match is unambiguous, and patch the markdown.
-        entities_in_chapter, summary_md = _normalize_entities(
-            entities_in_chapter, summary_md, entity_info
-        )
+        # Resolve aliases: ask the AI whether any new entities are nicknames /
+        # short forms of already-known entities, then patch the markdown.
+        new_entities = [e for e in entities_in_chapter if e["slug"] not in entity_info]
+        if new_entities and entity_info:
+            try:
+                alias_map = await resolve_entity_aliases(
+                    api_key, model, new_entities, entity_info, summary_md
+                )
+                if alias_map:
+                    entities_in_chapter, summary_md = _apply_alias_map(
+                        entities_in_chapter, summary_md, alias_map, entity_info
+                    )
+            except Exception:
+                pass  # alias resolution is best-effort; never block chapter processing
 
         # Persist the AI-generated title on the chapter row
         chapter.clean_title = clean_title
