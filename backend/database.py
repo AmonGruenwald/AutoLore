@@ -109,3 +109,21 @@ class Setting(Base):
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _run_migrations()
+
+
+def _run_migrations():
+    """Apply any schema changes that create_all won't handle on existing databases."""
+    migrations = [
+        "ALTER TABLE books ADD COLUMN generation_step TEXT",
+    ]
+    with engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(_text(sql))
+                conn.commit()
+            except Exception:
+                pass  # column already exists — safe to ignore
+
+
+from sqlalchemy import text as _text
