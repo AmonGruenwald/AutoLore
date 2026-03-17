@@ -71,6 +71,7 @@ class Chapter(Base):
     title = Column(String, default="")
     raw_text = Column(Text, nullable=False)
     is_story_chapter = Column(Boolean, nullable=True)  # None = unclassified
+    clean_title = Column(String, nullable=True)        # AI-generated descriptive title
 
     book = relationship("Book", back_populates="chapters")
 
@@ -118,6 +119,7 @@ def _run_migrations():
     migrations = [
         "ALTER TABLE books ADD COLUMN generation_step TEXT",
         "ALTER TABLE chapters ADD COLUMN is_story_chapter INTEGER",
+        "ALTER TABLE chapters ADD COLUMN clean_title TEXT",
     ]
     with engine.connect() as conn:
         for sql in migrations:

@@ -317,8 +317,12 @@ def _book_summary(book: Book) -> dict:
 def _book_detail(book: Book) -> dict:
     d = _book_summary(book)
     d["generation_error"] = book.generation_error
+    story_chapters = sorted(
+        [c for c in book.chapters if c.is_story_chapter is not False],
+        key=lambda c: c.number,
+    )
     d["chapters"] = [
-        {"number": c.number, "title": c.title}
-        for c in sorted(book.chapters, key=lambda c: c.number)
+        {"number": i + 1, "title": c.clean_title or c.title}
+        for i, c in enumerate(story_chapters)
     ]
     return d

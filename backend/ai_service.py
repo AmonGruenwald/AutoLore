@@ -92,6 +92,7 @@ async def generate_chapter_summary(
     """
     Returns:
       {
+        "clean_title": "short descriptive chapter title",
         "summary": "markdown text with [[Type:Name]] links",
         "entities": [{"type": "character|place|event", "name": "...", "slug": "..."}]
       }
@@ -120,6 +121,7 @@ Instructions:
   Set it to "minor" if they are only named in passing with no new information.
 
 Output format:
+<title>[short, descriptive title for this chapter (4-8 words, based on the key events)]</title>
 <summary>
 [your summary markdown here]
 </summary>
@@ -137,9 +139,11 @@ Output format:
 
 
 def _parse_summary_response(raw: str, chapter_number: int) -> dict:
+    title_match = re.search(r"<title>(.*?)</title>", raw, re.DOTALL)
     summary_match = re.search(r"<summary>(.*?)</summary>", raw, re.DOTALL)
     entities_match = re.search(r"<entities>(.*?)</entities>", raw, re.DOTALL)
 
+    clean_title = title_match.group(1).strip() if title_match else None
     summary = summary_match.group(1).strip() if summary_match else raw.strip()
 
     entities = []
@@ -157,7 +161,7 @@ def _parse_summary_response(raw: str, chapter_number: int) -> dict:
         except json.JSONDecodeError:
             pass
 
-    return {"summary": summary, "entities": entities, "chapter_number": chapter_number}
+    return {"clean_title": clean_title, "summary": summary, "entities": entities, "chapter_number": chapter_number}
 
 
 async def generate_entity_page(

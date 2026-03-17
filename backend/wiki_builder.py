@@ -175,10 +175,15 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
 
         summary_md = result["summary"]
         entities_in_chapter = result["entities"]
+        clean_title = result.get("clean_title") or chapter.title
+
+        # Persist the AI-generated title on the chapter row
+        chapter.clean_title = clean_title
+        db.flush()
 
         # Store summary page version
         story_chapter_idx = next_idx + 1  # 1-based story chapter number (used for all versioning)
-        summary_page = _get_or_create_wiki_page(db, book_id, "summary", chapter.title)
+        summary_page = _get_or_create_wiki_page(db, book_id, "summary", clean_title)
         links = resolve_links(summary_md)
         db.add(WikiPageVersion(
             page_id=summary_page.id,
