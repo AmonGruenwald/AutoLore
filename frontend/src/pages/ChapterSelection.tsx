@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Loader2, GitMerge, Check, X, ArrowLeft } from 'lucide-react'
+import { Loader2, GitMerge, Check, X, ArrowLeft, Pencil } from 'lucide-react'
 import { getChapters, confirmChapterSelection } from '../lib/api'
 import type { ChapterPreview } from '../lib/api'
 
@@ -16,10 +16,14 @@ export default function ChapterSelection() {
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState('')
 
-  // included: set of chapter IDs the user wants to process
   const [included, setIncluded] = useState<Set<number>>(new Set())
-  // mergedWithNext: set of chapter IDs that should be merged with the following chapter
   const [mergedWithNext, setMergedWithNext] = useState<Set<number>>(new Set())
+  // renames: chapter id → user-edited title
+  const [renames, setRenames] = useState<Map<number, string>>(new Map())
+  // which chapter title is being edited right now
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editingValue, setEditingValue] = useState('')
+  const editInputRef = useRef<HTMLInputElement>(null)
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -85,13 +89,36 @@ export default function ChapterSelection() {
     })
   }
 
+  function startEdit(chapter: ChapterPreview) {
+    setEditingId(chapter.id)
+    setEditingValue(renames.get(chapter.id) ?? chapter.title)
+    setTimeout(() => editInputRef.current?.select(), 0)
+  }
+
+  function commitEdit() {
+    if (editingId === null) return
+    const trimmed = editingValue.trim()
+    const original = chapters.find(c => c.id === editingId)?.title ?? ''
+    setRenames(prev => {
+      const next = new Map(prev)
+      if (trimmed && trimmed !== original) next.set(editingId, trimmed)
+      else next.delete(editingId)  // revert to original if blank or unchanged
+      return next
+    })
+    setEditingId(null)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditingValue('')
+  }
+
   async function handleConfirm() {
     setConfirming(true)
     setError('')
     try {
       const selections = chapters.map(c => ({ id: c.id, include: included.has(c.id) }))
 
-      // Build merge pairs from mergedWithNext
       const merges: number[][] = []
       for (let i = 0; i < chapters.length - 1; i++) {
         if (mergedWithNext.has(chapters[i].id)) {
@@ -99,7 +126,9 @@ export default function ChapterSelection() {
         }
       }
 
-      await confirmChapterSelection(id, selections, merges)
+      const renamesList = Array.from(renames.entries()).map(([chId, title]) => ({ id: chId, title }))
+
+      await confirmChapterSelection(id, selections, merges, renamesList)
       navigate(`/book/${id}`)
     } catch (e: any) {
       setError(e.message)
@@ -132,7 +161,8 @@ export default function ChapterSelection() {
         <h1 className="text-2xl font-bold text-ink">{bookTitle}</h1>
         <p className="text-sm text-ink-muted mt-1">
           Select the chapters to include in the wiki. Toggle any off to skip them,
-          or use <span className="font-medium">Merge ↓</span> to combine two consecutive chapters into one.
+          use <span className="font-medium">Merge ↓</span> to combine two consecutive chapters into one,
+          or click a title to rename it.
         </p>
       </div>
 
@@ -188,7 +218,7 @@ export default function ChapterSelection() {
               )}
               <div
                 className={[
-                  'flex items-start gap-3 px-4 py-3 border-b border-parchment-200 last:border-b-0 transition-colors',
+                  'group flex items-start gap-3 px-4 py-3 border-b border-parchment-200 last:border-b-0 transition-colors',
                   !isIncluded ? 'bg-parchment-100 opacity-50' : 'bg-white',
                   isMergedFrom ? 'border-l-2 border-l-amber-400' : '',
                 ].join(' ')}
@@ -209,9 +239,38 @@ export default function ChapterSelection() {
 
                 {/* Chapter info */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2">
+                  <div className="flex items-center gap-1.5">
                     <span className="text-xs text-ink-muted shrink-0">#{chapter.number}</span>
-                    <span className="font-medium text-sm truncate">{chapter.title}</span>
+                    {editingId === chapter.id ? (
+                      <>
+                        <input
+                          ref={editInputRef}
+                          value={editingValue}
+                          onChange={e => setEditingValue(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') cancelEdit() }}
+                          onBlur={commitEdit}
+                          className="flex-1 min-w-0 text-sm font-medium border-b border-ink outline-none bg-transparent"
+                        />
+                        <button onClick={commitEdit} className="shrink-0 text-green-700 hover:text-green-900"><Check size={13} strokeWidth={3} /></button>
+                        <button onClick={cancelEdit} className="shrink-0 text-ink-muted hover:text-ink"><X size={13} /></button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-medium text-sm truncate">
+                          {renames.get(chapter.id) ?? chapter.title}
+                          {renames.has(chapter.id) && (
+                            <span className="ml-1 text-xs text-amber-600 font-normal">(renamed)</span>
+                          )}
+                        </span>
+                        <button
+                          onClick={() => startEdit(chapter)}
+                          title="Rename chapter"
+                          className="shrink-0 text-ink-muted hover:text-ink opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                      </>
+                    )}
                   </div>
                   <p className="text-xs text-ink-muted mt-0.5 leading-relaxed">
                     {chapter.one_sentence_summary ?? (

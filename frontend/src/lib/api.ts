@@ -30,10 +30,11 @@ export const confirmChapterSelection = (
   id: number,
   selections: { id: number; include: boolean }[],
   merges: number[][],
+  renames: { id: number; title: string }[] = [],
 ) =>
   request(`/books/${id}/confirm-selection`, {
     method: 'POST',
-    body: JSON.stringify({ selections, merges }),
+    body: JSON.stringify({ selections, merges, renames }),
   })
 
 export const setStopChapter = (id: number, stopChapter: number | null) =>

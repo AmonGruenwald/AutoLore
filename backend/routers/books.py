@@ -237,9 +237,15 @@ class ChapterSelectionItem(BaseModel):
     include: bool
 
 
+class ChapterRenameItem(BaseModel):
+    id: int
+    title: str
+
+
 class ConfirmSelectionBody(BaseModel):
     selections: list[ChapterSelectionItem]
-    merges: list[list[int]] = []  # each sub-list is a pair [id_a, id_b] to merge
+    merges: list[list[int]] = []   # each sub-list is a pair [id_a, id_b] to merge
+    renames: list[ChapterRenameItem] = []  # user-edited chapter titles
 
 
 @router.post("/{book_id}/confirm-selection")
@@ -289,6 +295,12 @@ async def confirm_selection(
         ch = db.query(Chapter).filter_by(id=ch_id, book_id=book_id).first()
         if ch:
             ch.is_story_chapter = False
+
+    # Apply user renames (stored as clean_title so the original title is preserved)
+    for rename in body.renames:
+        ch = db.query(Chapter).filter_by(id=rename.id, book_id=book_id).first()
+        if ch and rename.title.strip():
+            ch.clean_title = rename.title.strip()
 
     story_count = sum(1 for s in body.selections if s.id in include_ids)
     book.total_chapters = story_count
