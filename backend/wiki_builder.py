@@ -177,11 +177,12 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
         entities_in_chapter = result["entities"]
 
         # Store summary page version
+        story_chapter_idx = next_idx + 1  # 1-based story chapter number (used for all versioning)
         summary_page = _get_or_create_wiki_page(db, book_id, "summary", chapter.title)
         links = resolve_links(summary_md)
         db.add(WikiPageVersion(
             page_id=summary_page.id,
-            first_visible_chapter=chapter.number,
+            first_visible_chapter=story_chapter_idx,
             content_markdown=summary_md,
             outgoing_links=links,
         ))
@@ -228,7 +229,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                             task["info"]["name"],
                             task["info"]["type"],
                             summary_md,
-                            chapter.number,
+                            story_chapter_idx,
                             task["existing_content"],
                         )
                     except Exception as exc:
@@ -243,7 +244,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                 links = resolve_links(new_content)
                 db.add(WikiPageVersion(
                     page_id=task["page"].id,
-                    first_visible_chapter=chapter.number,
+                    first_visible_chapter=story_chapter_idx,
                     content_markdown=new_content,
                     outgoing_links=links,
                 ))

@@ -197,9 +197,10 @@ async def regenerate_wiki(
     if not api_key_setting or not api_key_setting.value:
         raise HTTPException(400, "OpenRouter API key not configured")
 
-    # Clear existing wiki data
-    from database import WikiPage
+    # Clear existing wiki data and reset chapter classification
+    from database import WikiPage, Chapter
     db.query(WikiPage).filter_by(book_id=book_id).delete()
+    db.query(Chapter).filter_by(book_id=book_id).update({"is_story_chapter": None})
     book.generation_status = "pending"
     book.generation_progress = 0
     book.generation_error = None
