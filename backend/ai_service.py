@@ -63,15 +63,23 @@ Each entry shows the chapter title and its opening text.
 
 {chapter_list}
 
-Decide for each chapter: is it part of the actual story/narrative (true) or supplementary material (false)?
+Classify each chapter as story content (true) or supplementary material (false).
 
-Supplementary material includes: author biographical notes, acknowledgements, dedications,
-maps/figures lists, glossary, appendix, bibliography, endnotes, copyright pages,
-"about the author" sections, publisher notes, and any other non-narrative content.
+SUPPLEMENTARY (false) — look at the OPENING TEXT, not just the title:
+- Author bio / "about the author": mentions the author's real life, education, other books they wrote
+- Acknowledgements, dedications: thanks readers, family, editors
+- Publisher/series notes: lists other books in the series, upcoming releases, publisher info
+- Glossary, appendix, bibliography, maps list, endnotes, copyright page
+- Any text that refers to "the author" in third person describing their real-world life
 
-Story content (true): prologues, epilogues, interludes, and any chapter with narrative prose.
+STORY (true): narrative prose with characters, dialogue, events, worldbuilding — regardless of title.
+Prologues, epilogues, interludes, and unnumbered chapters count as story if they have narrative content.
 
-IMPORTANT: You MUST output exactly {len(chapters)} booleans — one for every chapter listed above, in order.
+WARNING: A chapter can have an epic-sounding title but still be supplementary (e.g. a publisher
+page titled "The Opening of the Book of the Fallen" that actually describes the author's biography).
+Judge by the OPENING TEXT content, not the title alone.
+
+IMPORTANT: You MUST output exactly {len(chapters)} booleans — one per chapter in order.
 Respond with ONLY a JSON array of booleans. Example for 4 chapters: [true, true, false, true]"""
 
     raw = await _call_openrouter(api_key, model, [{"role": "user", "content": prompt}], temperature=0.0)
