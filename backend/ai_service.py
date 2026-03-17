@@ -193,9 +193,12 @@ Instructions:
   [[Character:Name]], [[Place:Name]], [[Event:Name]]
 - Use the most complete name for each entity as it appears in the text.
 - After the summary, output a JSON block listing all entities you linked to.
-- For each entity set "significance" to "major" if they have an active role, dialogue,
-  revealed attributes, or their situation changes in this chapter.
-  Set it to "minor" if they are only named in passing with no new information.
+- For each entity set "significance" to "major" if ANY of the following apply:
+  they have an active role, dialogue, revealed attributes (appearance, personality,
+  backstory, relationships, title, status), their situation changes, they perform
+  or receive an action, or any descriptive context about them appears in the chapter.
+  Set it to "minor" ONLY if the entity is referenced purely by name with absolutely
+  no additional context, description, or new information of any kind.
 
 Output format:
 <title>[short, descriptive title for this chapter (4-8 words, based on the key events)]</title>

@@ -337,7 +337,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             info = entity_info[slug]
             page = _get_or_create_wiki_page(db, book_id, info["type"], info["name"])
             is_first_appearance = not page.versions
-            if is_first_appearance or entity.get("significance") == "major":
+            if is_first_appearance or entity.get("significance") != "minor":
                 entities_to_update.append({
                     "info": info,
                     "page": page,
