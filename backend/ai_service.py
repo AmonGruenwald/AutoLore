@@ -45,43 +45,6 @@ async def _call_openrouter(
 
 
 
-async def _classify_single_chapter(
-    api_key: str,
-    model: str,
-    chapter: dict,
-    semaphore: asyncio.Semaphore,
-) -> bool:
-    """Classify a single chapter as story (True) or supplementary (False)."""
-    prompt = f"""You are deciding whether a book chapter is part of the story or is supplementary material.
-
-Chapter title: {chapter['title']}
-Opening text: {chapter['preview']}
-
-Supplementary material (answer false): author biographical notes, acknowledgements, dedications,
-publisher/series announcements, glossary, appendix, bibliography, copyright, "about the author" pages.
-These refer to the real author or real-world publishing details.
-
-Story content (answer true): narrative prose with fictional characters, dialogue, events, or worldbuilding.
-Prologues, epilogues, and interludes with narrative content are story.
-
-CRITICAL: Base your answer on the OPENING TEXT above, not the title.
-If the opening text refers to "the author" as a real person, describes their education or other books
-they wrote, or lists upcoming publications — answer false, regardless of how the title sounds.
-
-Answer with only the single word: true or false"""
-
-    async with semaphore:
-        try:
-            raw = await _call_openrouter(
-                api_key, model,
-                [{"role": "user", "content": prompt}],
-                temperature=0.0,
-            )
-            return raw.strip().lower().startswith("true")
-        except Exception:
-            return True  # default to story on error
-
-
 async def classify_story_chapters(
     api_key: str,
     model: str,
@@ -91,14 +54,43 @@ async def classify_story_chapters(
     Given a list of chapter dicts with 'number', 'title', and 'preview',
     returns a list of booleans — True if the chapter is part of the story, False if
     supplementary (author bios, acknowledgements, glossary, appendix, etc.).
-
-    Each chapter is classified in its own focused call, run in parallel.
     """
-    semaphore = asyncio.Semaphore(8)
-    results = await asyncio.gather(
-        *[_classify_single_chapter(api_key, model, c, semaphore) for c in chapters]
+    # List opening text before title so the model judges content, not title wording
+    chapter_list = "\n".join(
+        f"{i+1}. Opening text: \"{c['preview']}\" | Title: {c['title']}"
+        for i, c in enumerate(chapters)
     )
-    return list(results)
+    prompt = f"""Classify each of the {len(chapters)} chapters below as story (true) or supplementary (false).
+
+For each entry, read the OPENING TEXT first — the title may be misleading.
+
+SUPPLEMENTARY → false:
+- Opening text discusses the real author (their life, education, other books they wrote)
+- Publisher or series announcements, upcoming releases
+- Acknowledgements, dedications, copyright, glossary, appendix, bibliography
+
+STORY → true:
+- Opening text is narrative fiction: characters, dialogue, events, worldbuilding
+- Prologues, epilogues, interludes with fictional content
+
+{chapter_list}
+
+Output ONLY a JSON array of {len(chapters)} booleans in order, e.g. [true, false, true]"""
+
+    raw = await _call_openrouter(api_key, model, [{"role": "user", "content": prompt}], temperature=0.0)
+    match = re.search(r'\[[\s\S]*\]', raw)
+    if not match:
+        return [True] * len(chapters)
+    try:
+        result = json.loads(match.group())
+        if len(result) == len(chapters):
+            return [bool(v) for v in result]
+        # Salvage wrong-length response
+        if len(result) > len(chapters):
+            return [bool(v) for v in result[:len(chapters)]]
+        return [bool(v) for v in result] + [True] * (len(chapters) - len(result))
+    except Exception:
+        return [True] * len(chapters)
 
 
 async def generate_chapter_summary(
