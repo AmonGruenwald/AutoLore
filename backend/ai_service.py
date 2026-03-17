@@ -533,6 +533,74 @@ Respond ONLY with valid JSON: {{"is_duplicate": true/false, "confidence": 0.0-1.
     return {"is_duplicate": False, "confidence": 0.0, "reasoning": "Parse error"}
 
 
+async def answer_question(
+    api_key: str,
+    model: str,
+    question: str,
+    context_pages: list[dict],
+    chapter_number: int,
+    conversation_history: list[dict] | None = None,
+) -> str:
+    """
+    Answer a reader's question using only wiki pages visible up to chapter_number.
+    context_pages: [{"title": str, "type": str, "content": str}, ...]
+    conversation_history: prior [{"role": "user"|"assistant", "content": str}] turns
+    """
+    if context_pages:
+        parts = [
+            f"### {p['title']} ({p['type']})\n{p['content']}"
+            for p in context_pages
+        ]
+        context_text = "\n\n---\n\n".join(parts)
+    else:
+        context_text = "(No wiki entries are available yet for this chapter.)"
+
+    system_prompt = f"""You are a helpful reading companion for someone currently at chapter {chapter_number} of a book.
+
+STRICT RULES:
+1. Answer ONLY using the wiki entries provided below. Do not draw on any prior knowledge about this book.
+2. If the answer cannot be found in the provided entries, say so clearly — do not guess or extrapolate.
+3. Never hint at or reveal anything beyond what is already described in the entries below.
+4. Be concise but thorough. Reference character, place, and event names exactly as written.
+5. You may reason across multiple entries to form an answer.
+
+WIKI ENTRIES (all information available up to chapter {chapter_number}):
+
+{context_text}"""
+
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    if conversation_history:
+        messages.extend(conversation_history)
+    messages.append({"role": "user", "content": question})
+
+    return await _call_openrouter(api_key, model, messages, temperature=0.3, max_tokens=600)
+
+
+def score_page_relevance(question: str, title: str, content: str) -> float:
+    """Keyword-based relevance score for RAG page selection."""
+    stop_words = {
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'what', 'who', 'where',
+        'when', 'how', 'does', 'did', 'do', 'in', 'of', 'to', 'and', 'or',
+        'for', 'with', 'about', 'tell', 'me', 'know', 'can', 'has', 'have',
+        'had', 'his', 'her', 'their', 'its', 'that', 'this', 'which', 'he',
+        'she', 'they', 'it', 'be', 'at', 'by', 'from', 'as', 'on', 'not',
+        'but', 'also', 'any', 'all', 'been', 'will', 'would', 'could', 'my',
+    }
+    words = {w for w in re.findall(r'\w+', question.lower()) if len(w) >= 3} - stop_words
+    if not words:
+        return 0.0
+
+    combined = (title + ' ' + content).lower()
+    title_lower = title.lower()
+    score = 0.0
+    for word in words:
+        if word in title_lower:
+            score += 3.0          # strong signal: question term matches page title
+        count = combined.count(word)
+        score += min(count * 0.4, 2.0)   # content frequency, capped per term
+    return score
+
+
 def _slugify(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)

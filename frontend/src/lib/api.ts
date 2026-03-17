@@ -87,6 +87,26 @@ export const updateWikiPage = (bookId: number, slug: string, title: string, cont
 export const getSeriesWikiPages = (seriesId: number, upToChapter: number) =>
   request<WikiPageList>(`/wiki/series/${seriesId}/pages?up_to_global_chapter=${upToChapter}`)
 
+export interface AskResponse {
+  answer: string
+  sources: { title: string; slug: string; page_type: string }[]
+}
+
+export const askQuestion = (
+  bookId: number,
+  question: string,
+  upToChapter: number,
+  conversationHistory: { role: 'user' | 'assistant'; content: string }[] = [],
+) =>
+  request<AskResponse>(`/wiki/${bookId}/ask`, {
+    method: 'POST',
+    body: JSON.stringify({
+      question,
+      up_to_chapter: upToChapter,
+      conversation_history: conversationHistory,
+    }),
+  })
+
 // Series
 export const getSeries = () => request<Series[]>('/books/series/all')
 export const createSeries = (name: string, bookIds: number[]) =>

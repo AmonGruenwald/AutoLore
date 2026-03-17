@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import Book, WikiPage, WikiPageVersion, Series, Setting, get_db
+import ai_service
 
 router = APIRouter(prefix="/api/wiki", tags=["wiki"])
 
@@ -365,3 +366,69 @@ def list_series_wiki_pages(series_id: int, up_to_global_chapter: int, db: Sessio
         result[key].sort(key=lambda p: p["title"].lower())
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Q&A
+# ---------------------------------------------------------------------------
+
+class AskRequest(BaseModel):
+    question: str
+    up_to_chapter: int
+    conversation_history: list[dict] = []
+
+
+@router.post("/{book_id}/ask")
+async def ask_question(book_id: int, req: AskRequest, db: Session = Depends(get_db)):
+    """
+    Answer a reader question using only wiki pages visible at up_to_chapter (RAG).
+    Returns the AI answer and the source pages that were used as context.
+    """
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+
+    api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
+    model_row = db.query(Setting).filter_by(key="openrouter_model").first()
+    api_key = api_key_row.value if api_key_row else ""
+    model = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+
+    if not api_key:
+        raise HTTPException(400, "No API key configured")
+
+    # Collect all pages visible at this chapter
+    candidates = []
+    for page in db.query(WikiPage).filter_by(book_id=book_id).all():
+        visible = [v for v in page.versions if v.first_visible_chapter <= req.up_to_chapter]
+        if not visible:
+            continue
+        latest = max(visible, key=lambda v: v.first_visible_chapter)
+        candidates.append({
+            "title": page.title,
+            "type": page.page_type,
+            "slug": page.slug,
+            "content": latest.content_markdown,
+        })
+
+    # Rank by relevance to the question; take top 8 with score > 0
+    scored = sorted(
+        candidates,
+        key=lambda c: ai_service.score_page_relevance(req.question, c["title"], c["content"]),
+        reverse=True,
+    )
+    top = [c for c in scored[:8] if ai_service.score_page_relevance(req.question, c["title"], c["content"]) > 0]
+    # Fallback: always send at least 3 pages so the model has some context
+    if not top:
+        top = scored[:3]
+
+    answer = await ai_service.answer_question(
+        api_key=api_key,
+        model=model,
+        question=req.question,
+        context_pages=top,
+        chapter_number=req.up_to_chapter,
+        conversation_history=req.conversation_history or None,
+    )
+
+    sources = [{"title": p["title"], "slug": p["slug"], "page_type": p["type"]} for p in top]
+    return {"answer": answer, "sources": sources}

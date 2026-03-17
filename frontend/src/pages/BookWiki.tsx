@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight, Clock } from 'lucide-react'
+import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight, Clock, MessageCircle } from 'lucide-react'
 import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing, setStopChapter, deleteWikiPage, mergeWikiPages, updateWikiPage } from '../lib/api'
 import type { BookDetail, WikiPageList, WikiPageContent } from '../lib/api'
 import ChapterSlider from '../components/ChapterSlider'
 import WikiSidebar from '../components/WikiSidebar'
 import WikiPageComponent from '../components/WikiPage'
 import WikiHome from '../components/WikiHome'
+import AskPanel from '../components/AskPanel'
 import GenerationStatus from '../components/GenerationStatus'
 
 export default function BookWiki() {
@@ -26,6 +27,7 @@ export default function BookWiki() {
   const [continuing, setContinuing] = useState(false)
   const [stopChapterInput, setStopChapterInput] = useState<string>('')
   const [merging, setMerging] = useState(false)
+  const [askOpen, setAskOpen] = useState(false)
 
   useEffect(() => {
     getBook(id).then(b => {
@@ -200,6 +202,19 @@ export default function BookWiki() {
             {book.author && <p className="text-xs text-ink-muted truncate">{book.author}</p>}
           </div>
           {!isProcessing && <GenerationStatus book={book} />}
+          {canBrowse && (
+            <button
+              onClick={() => setAskOpen(v => !v)}
+              title="Ask the wiki"
+              className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
+                askOpen
+                  ? 'bg-amber-50 border-amber-300 text-amber-600'
+                  : 'border-parchment-200 text-ink-muted hover:bg-amber-50 hover:border-amber-200 hover:text-amber-600'
+              }`}
+            >
+              <MessageCircle size={14} />
+            </button>
+          )}
           <button
             onClick={handleDelete}
             title="Delete book and wiki"
@@ -294,7 +309,7 @@ export default function BookWiki() {
             />
           )}
 
-          <div className="relative flex flex-1 overflow-hidden">
+          <div className="relative flex flex-1 overflow-hidden" style={{ minWidth: 0 }}>
             {sidebarOpen && (
               <div
                 className="absolute inset-0 z-10 bg-black/20 md:hidden"
@@ -384,6 +399,16 @@ export default function BookWiki() {
                 </div>
               )}
             </main>
+
+            {/* Ask panel */}
+            {askOpen && canBrowse && (
+              <AskPanel
+                bookId={id}
+                effectiveChapter={effectiveChapter}
+                onClose={() => setAskOpen(false)}
+                onNavigate={slug => { setSelectedSlug(slug); setSidebarOpen(false) }}
+              />
+            )}
           </div>
         </>
       )}
