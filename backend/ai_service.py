@@ -58,27 +58,39 @@ async def classify_story_chapters(
         f"{i+1}. [{c['title']}] {c['preview']}"
         for i, c in enumerate(chapters)
     )
-    prompt = f"""Below is a numbered list of chapters from a book. Each entry shows the chapter title and its opening text.
+    prompt = f"""Below is a numbered list of ALL {len(chapters)} chapters from a book.
+Each entry shows the chapter title and its opening text.
 
 {chapter_list}
 
-Decide for each chapter whether it is part of the actual story/narrative (true) or supplementary material (false).
-Supplementary material includes: author biographical notes, acknowledgements, dedications, maps/figures lists, glossary, appendix, bibliography, endnotes, copyright pages, "about the author" sections, publisher notes, and any other non-narrative content.
-Prologues, epilogues, interludes, and chapters with story content should be marked true.
+Decide for each chapter: is it part of the actual story/narrative (true) or supplementary material (false)?
 
-Respond with ONLY a JSON array of booleans, one per chapter, in order. Example for 4 chapters: [true, true, false, true]"""
+Supplementary material includes: author biographical notes, acknowledgements, dedications,
+maps/figures lists, glossary, appendix, bibliography, endnotes, copyright pages,
+"about the author" sections, publisher notes, and any other non-narrative content.
+
+Story content (true): prologues, epilogues, interludes, and any chapter with narrative prose.
+
+IMPORTANT: You MUST output exactly {len(chapters)} booleans — one for every chapter listed above, in order.
+Respond with ONLY a JSON array of booleans. Example for 4 chapters: [true, true, false, true]"""
 
     raw = await _call_openrouter(api_key, model, [{"role": "user", "content": prompt}], temperature=0.0)
-    # Extract the JSON array from the response
-    match = re.search(r'\[[\s\S]*\]', raw)
+    match = re.search(r'\[[\s\S]*?\]', raw)
     if not match:
-        # If parsing fails, default everything to true
         return [True] * len(chapters)
     try:
         result = json.loads(match.group())
-        if len(result) != len(chapters):
-            return [True] * len(chapters)
-        return [bool(v) for v in result]
+        if len(result) == len(chapters):
+            return [bool(v) for v in result]
+    except Exception:
+        pass
+    # Length mismatch or parse error — try to salvage by padding/truncating
+    try:
+        result = json.loads(match.group())
+        if len(result) > len(chapters):
+            return [bool(v) for v in result[:len(chapters)]]
+        # Too short: assume the model omitted trailing story chapters
+        return [bool(v) for v in result] + [True] * (len(chapters) - len(result))
     except Exception:
         return [True] * len(chapters)
 
@@ -186,8 +198,16 @@ async def generate_entity_page(
         "event": "what happened, who was involved, causes, consequences, timeline position",
     }.get(entity_type, "all relevant details")
 
+    focus_rule = (
+        f'CRITICAL: Write ONLY about the {entity_type} named "{entity_name}". '
+        f'The summary mentions other characters and entities — ignore them except '
+        f'when they directly interact with or affect "{entity_name}".'
+    )
+
     if existing_content:
         prompt = f"""Update the wiki page for {entity_type.upper()}: "{entity_name}".
+
+{focus_rule}
 
 Existing page:
 {existing_content}
@@ -196,8 +216,8 @@ New information from Chapter {chapter_number} summary:
 {chapter_summary}
 
 Instructions:
-- Incorporate any new information from this chapter into the existing page.
-- Only add details explicitly stated in the chapter summary above.
+- Extract ONLY facts about "{entity_name}" from the chapter summary above.
+- Incorporate new information into the existing page.
 - Keep all existing accurate information; do not remove it.
 - Use [[Character:Name]], [[Place:Name]], [[Event:Name]] syntax for cross-references.
 - Use markdown formatting (## headings, bullet lists where appropriate).
@@ -206,11 +226,13 @@ Instructions:
     else:
         prompt = f"""Create a wiki page for {entity_type.upper()}: "{entity_name}".
 
+{focus_rule}
+
 Source — Chapter {chapter_number} summary:
 {chapter_summary}
 
-Write a wiki page covering: {type_instructions}.
-- Only include information explicitly stated above.
+Extract ONLY information about "{entity_name}" and write a wiki page covering: {type_instructions}.
+- Only include details explicitly stated in the summary above that concern "{entity_name}".
 - Use [[Character:Name]], [[Place:Name]], [[Event:Name]] syntax for cross-references.
 - Use markdown formatting (## headings, bullet lists where appropriate).
 - Do not include a top-level title."""

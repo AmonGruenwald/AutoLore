@@ -190,7 +190,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                 {
                     "number": c.number,
                     "title": c.title,
-                    "preview": c.raw_text[:200].strip(),
+                    "preview": c.raw_text[:400].strip(),
                 }
                 for c in all_chapters
             ]
