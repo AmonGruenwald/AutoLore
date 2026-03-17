@@ -61,6 +61,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
 
         book.generation_status = "processing"
         book.generation_progress = 0
+        book.generation_step = "Starting…"
         db.commit()
 
         api_key, model = await _get_settings(db)
@@ -82,6 +83,8 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             }
 
             # 1. Generate chapter summary
+            book.generation_step = f"Summarising chapter {chapter.number}: "{chapter.title}""
+            db.commit()
             try:
                 result = await generate_chapter_summary(
                     api_key, model, chapter_dict, previous_summaries
@@ -129,6 +132,8 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                 existing_page = _get_or_create_wiki_page(db, book_id, info["type"], info["name"])
                 existing_content = _latest_version_content(existing_page)
 
+                book.generation_step = f"Updating {info['type']} page: "{info['name']}""
+                db.commit()
                 try:
                     new_content = await generate_entity_page(
                         api_key,
@@ -156,6 +161,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             db.commit()
 
         book.generation_status = "done"
+        book.generation_step = None
         db.commit()
 
     except Exception as e:

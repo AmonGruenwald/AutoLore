@@ -286,6 +286,7 @@ def _book_summary(book: Book) -> dict:
         "total_chapters": book.total_chapters,
         "generation_status": book.generation_status,
         "generation_progress": book.generation_progress,
+        "generation_step": book.generation_step,
         "series_id": book.series_id,
         "series_order": book.series_order,
         "created_at": book.created_at.isoformat() if book.created_at else None,

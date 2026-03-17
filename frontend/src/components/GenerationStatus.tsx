@@ -27,10 +27,10 @@ export default function GenerationStatus({ book }: Props) {
   if (status === 'processing') {
     const pct = total_chapters > 0 ? Math.round((progress / total_chapters) * 100) : 0
     return (
-      <div className="flex flex-col gap-1">
-        <span className="flex items-center gap-1 text-amber-700 text-xs">
-          <Loader2 size={12} className="animate-spin" />
-          Generating wiki... {progress}/{total_chapters} chapters
+      <div className="flex flex-col gap-1 min-w-0">
+        <span className="flex items-center gap-1 text-amber-700 text-xs whitespace-nowrap">
+          <Loader2 size={12} className="animate-spin shrink-0" />
+          Chapter {progress}/{total_chapters}
         </span>
         <div className="w-full bg-parchment-200 rounded-full h-1.5">
           <div
@@ -38,6 +38,11 @@ export default function GenerationStatus({ book }: Props) {
             style={{ width: `${pct}%` }}
           />
         </div>
+        {book.generation_step && (
+          <span className="text-xs text-ink-muted truncate max-w-xs" title={book.generation_step}>
+            {book.generation_step}
+          </span>
+        )}
       </div>
     )
   }

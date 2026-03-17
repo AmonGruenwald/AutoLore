@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, AlertCircle, Loader2 } from 'lucide-react'
-import { getBook, getWikiPages, getWikiPage } from '../lib/api'
+import { ArrowLeft, AlertCircle, Loader2, Trash2 } from 'lucide-react'
+import { getBook, getWikiPages, getWikiPage, deleteBook } from '../lib/api'
 import type { BookDetail, WikiPageList, WikiPageContent } from '../lib/api'
 import ChapterSlider from '../components/ChapterSlider'
 import WikiSidebar from '../components/WikiSidebar'
@@ -52,6 +52,12 @@ export default function BookWiki() {
       .finally(() => setLoadingPage(false))
   }, [id, selectedSlug, chapter])
 
+  async function handleDelete() {
+    if (!book || !confirm(`Delete "${book.title}" and its entire wiki?`)) return
+    await deleteBook(id)
+    navigate('/')
+  }
+
   function handleNavigate(slug: string) {
     setSelectedSlug(slug)
   }
@@ -83,6 +89,13 @@ export default function BookWiki() {
             {book.author && <p className="text-xs text-ink-muted">{book.author}</p>}
           </div>
           <GenerationStatus book={book} />
+          <button
+            onClick={handleDelete}
+            title="Delete book and wiki"
+            className="p-1.5 rounded border border-red-200 hover:bg-red-50 text-red-400 shrink-0"
+          >
+            <Trash2 size={15} />
+          </button>
         </div>
       </div>
 

@@ -74,6 +74,7 @@ export interface Book {
   total_chapters: number
   generation_status: 'pending' | 'processing' | 'done' | 'error'
   generation_progress: number
+  generation_step: string | null
   series_id: number | null
   series_order: number | null
   created_at: string
