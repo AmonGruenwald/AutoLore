@@ -6,6 +6,7 @@ import type { WikiPageContent } from '../lib/api'
 interface Props {
   page: WikiPageContent
   onNavigate: (slug: string) => void
+  visibleSlugs?: Set<string>
 }
 
 const TYPE_BADGE: Record<string, string> = {
@@ -15,14 +16,17 @@ const TYPE_BADGE: Record<string, string> = {
   event: 'bg-orange-100 text-orange-800',
 }
 
-export default function WikiPage({ page, onNavigate }: Props) {
-  // Replace [[Type:Name]] links in markdown with a marker we can intercept
+export default function WikiPage({ page, onNavigate, visibleSlugs }: Props) {
+  // Replace [[Type:Name]] links in markdown with a marker we can intercept.
+  // Existence check: prefer the authoritative visibleSlugs set (derived from
+  // the current page list), fall back to the stored outgoing_links exists flag.
   const processedMarkdown = page.content_markdown.replace(
     /\[\[(\w+):([^\]]+)\]\]/g,
     (_, type, name) => {
       const slug = slugify(`${type}-${name}`)
-      const link = page.outgoing_links.find(l => l.slug === slug)
-      const exists = link?.exists ?? false
+      const exists = visibleSlugs
+        ? visibleSlugs.has(slug)
+        : (page.outgoing_links.find(l => l.slug === slug)?.exists ?? false)
       return exists
         ? `[${name}](wiki:${slug})`
         : `[${name}](wiki-missing:${slug})`

@@ -214,7 +214,16 @@ export default function BookWiki() {
               {loadingPage ? (
                 <div className="flex justify-center pt-16"><Loader2 size={24} className="animate-spin" /></div>
               ) : currentPage ? (
-                <WikiPageComponent page={currentPage} onNavigate={setSelectedSlug} />
+                <WikiPageComponent
+                  page={currentPage}
+                  onNavigate={setSelectedSlug}
+                  visibleSlugs={pages ? new Set([
+                    ...pages.summaries.map(p => p.slug),
+                    ...pages.characters.map(p => p.slug),
+                    ...pages.places.map(p => p.slug),
+                    ...pages.events.map(p => p.slug),
+                  ]) : undefined}
+                />
               ) : (
                 <div className="text-center text-ink-muted pt-16">
                   {isProcessing && maxChapter < 1
