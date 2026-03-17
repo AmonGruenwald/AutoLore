@@ -57,10 +57,13 @@ async def _classify_single_chapter(
 Opening text: {chapter['preview']}
 Title: {chapter['title']}
 
-Supplementary (false): author bio, acknowledgements, dedications, publisher/series announcements,
-glossary, appendix, bibliography, copyright. These discuss the real author or real-world publishing.
+Supplementary (false):
+- Author bio, acknowledgements, dedications, publisher/series announcements, copyright
+- Glossary or terminology lists (defines words/terms)
+- Cast lists, character lists, dramatis personae (lists character names with brief descriptions)
+- Appendix, bibliography, index, endnotes, maps list
 
-Story (true): fictional narrative — characters, dialogue, events, worldbuilding.
+Story (true): narrative prose with characters, dialogue, events, or worldbuilding.
 Prologues, epilogues, and interludes with narrative content are story.
 
 Judge by the opening text above, not the title. Answer with one word: true or false"""
