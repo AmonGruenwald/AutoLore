@@ -121,6 +121,7 @@ def _run_migrations():
         "ALTER TABLE books ADD COLUMN generation_step TEXT",
         "ALTER TABLE chapters ADD COLUMN is_story_chapter INTEGER",
         "ALTER TABLE chapters ADD COLUMN clean_title TEXT",
+        "ALTER TABLE books ADD COLUMN stop_chapter INTEGER",
     ]
     with engine.connect() as conn:
         for sql in migrations:
