@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, BookOpen, Trash2, RotateCw, Library, AlertTriangle, X } from 'lucide-react'
-import { getBooks, deleteBook, regenerateWiki, uploadBook, confirmDuplicateUpload, getSeries, deleteSeries } from '../lib/api'
-import type { Book, Series, UploadResult } from '../lib/api'
+import { Upload, BookOpen, Trash2, RotateCw, Library, AlertTriangle, X, KeyRound } from 'lucide-react'
+import { getBooks, deleteBook, regenerateWiki, uploadBook, confirmDuplicateUpload, getSeries, deleteSeries, getSettings } from '../lib/api'
+import type { Book, Series, UploadResult, AppSettings } from '../lib/api'
 import GenerationStatus from '../components/GenerationStatus'
 import SeriesModal from '../components/SeriesModal'
 
 export default function Home() {
   const [books, setBooks] = useState<Book[]>([])
   const [series, setSeries] = useState<Series[]>([])
+  const [settings, setSettings] = useState<AppSettings | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const [duplicateInfo, setDuplicateInfo] = useState<(UploadResult & { _file: File }) | null>(null)
@@ -19,18 +20,19 @@ export default function Home() {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const load = useCallback(async () => {
-    const [b, s] = await Promise.all([getBooks(), getSeries()])
+    const [b, s, cfg] = await Promise.all([getBooks(), getSeries(), getSettings()])
     setBooks(b)
     setSeries(s)
+    setSettings(cfg)
   }, [])
 
   useEffect(() => {
     load()
   }, [load])
 
-  // Poll while any book is processing
+  // Poll while any book is processing or pending (pending may transition to processing)
   useEffect(() => {
-    const isProcessing = books.some(b => b.generation_status === 'processing')
+    const isProcessing = books.some(b => b.generation_status === 'processing' || b.generation_status === 'pending')
     if (isProcessing && !pollingRef.current) {
       pollingRef.current = setInterval(load, 3000)
     } else if (!isProcessing && pollingRef.current) {
@@ -109,6 +111,13 @@ export default function Home() {
           <input ref={fileInputRef} type="file" accept=".epub" className="hidden" onChange={handleFileChange} />
         </div>
       </div>
+
+      {settings && !settings.openrouter_api_key_set && (
+        <div className="mb-4 flex items-center gap-2 bg-amber-50 text-amber-800 border border-amber-300 rounded px-4 py-2 text-sm">
+          <KeyRound size={14} className="shrink-0" />
+          <span>No API key configured — books will be imported but wiki generation won't start until you <button onClick={() => navigate('/settings')} className="underline font-medium">add your OpenRouter key</button>.</span>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 flex items-center gap-2 bg-red-50 text-red-700 border border-red-200 rounded px-4 py-2 text-sm">

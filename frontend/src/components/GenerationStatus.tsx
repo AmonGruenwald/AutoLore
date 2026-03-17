@@ -49,7 +49,7 @@ export default function GenerationStatus({ book }: Props) {
 
   return (
     <span className="flex items-center gap-1 text-ink-muted text-xs">
-      <Clock size={12} /> Pending generation
+      <Clock size={12} /> Waiting — configure API key in Settings to generate
     </span>
   )
 }
