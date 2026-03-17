@@ -2,11 +2,10 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from database import Book, Chapter, Series, Setting, get_db
+from database import Book, Chapter, Series, Setting, WikiPage, get_db, SessionLocal
 from epub_parser import parse_epub
 from duplicate_detector import compute_hash, find_duplicate
 from wiki_builder import build_wiki_for_book
-from database import SessionLocal
 
 router = APIRouter(prefix="/api/books", tags=["books"])
 
@@ -16,6 +15,51 @@ os.makedirs(EPUB_STORAGE, exist_ok=True)
 
 def _db_factory():
     return SessionLocal()
+
+
+def _get_api_settings(db: Session) -> tuple[str, str]:
+    """Return (api_key, model) from settings, with defaults."""
+    api_key_setting = db.query(Setting).filter_by(key="openrouter_api_key").first()
+    model_setting = db.query(Setting).filter_by(key="openrouter_model").first()
+    api_key = api_key_setting.value if api_key_setting else ""
+    model = model_setting.value if model_setting else "mistralai/mistral-7b-instruct"
+    return api_key, model
+
+
+def _import_book(db: Session, file_bytes: bytes, filename: str) -> Book:
+    """Parse epub, persist to DB, and return the new Book (not yet committed)."""
+    content_hash = compute_hash(file_bytes)
+
+    try:
+        parsed = parse_epub(file_bytes)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to parse EPUB: {e}")
+
+    epub_path = os.path.join(EPUB_STORAGE, f"{content_hash}.epub")
+    with open(epub_path, "wb") as f:
+        f.write(file_bytes)
+
+    book = Book(
+        title=parsed.title,
+        author=parsed.author,
+        filename=filename,
+        content_hash=content_hash,
+        total_chapters=len(parsed.chapters),
+        generation_status="pending",
+    )
+    db.add(book)
+    db.flush()
+
+    for ch in parsed.chapters:
+        db.add(Chapter(
+            book_id=book.id,
+            number=ch.number,
+            title=ch.title,
+            raw_text=ch.raw_text,
+        ))
+
+    db.commit()
+    return book
 
 
 @router.get("/")
@@ -37,7 +81,6 @@ def delete_book(book_id: int, db: Session = Depends(get_db)):
     book = db.query(Book).filter_by(id=book_id).first()
     if not book:
         raise HTTPException(404, "Book not found")
-    # Remove stored epub file
     epub_path = os.path.join(EPUB_STORAGE, f"{book.content_hash}.epub")
     if os.path.exists(epub_path):
         os.remove(epub_path)
@@ -58,75 +101,35 @@ async def upload_book(
     file_bytes = await file.read()
     content_hash = compute_hash(file_bytes)
 
-    # Parse epub first to get metadata
     try:
         parsed = parse_epub(file_bytes)
     except Exception as e:
         raise HTTPException(400, f"Failed to parse EPUB: {e}")
 
-    # Get API key for duplicate detection
-    api_key_setting = db.query(Setting).filter_by(key="openrouter_api_key").first()
-    model_setting = db.query(Setting).filter_by(key="openrouter_model").first()
-    api_key = api_key_setting.value if api_key_setting else ""
-    model = model_setting.value if model_setting else "mistralai/mistral-7b-instruct"
-
+    api_key, model = _get_api_settings(db)
     excerpt = parsed.chapters[0].raw_text[:500] if parsed.chapters else ""
 
-    # Duplicate detection (only if API key is configured)
-    duplicate_info = None
     if api_key:
         duplicate_info = await find_duplicate(
             db, content_hash, parsed.title, parsed.author, excerpt, api_key, model
         )
+        if duplicate_info:
+            return {
+                "status": "duplicate_found",
+                "existing_book_id": duplicate_info["book"].id,
+                "existing_title": duplicate_info["book"].title,
+                "confidence": duplicate_info["confidence"],
+                "reasoning": duplicate_info["reasoning"],
+                "parsed_title": parsed.title,
+                "parsed_author": parsed.author,
+            }
 
-    if duplicate_info:
-        return {
-            "status": "duplicate_found",
-            "existing_book_id": duplicate_info["book"].id,
-            "existing_title": duplicate_info["book"].title,
-            "confidence": duplicate_info["confidence"],
-            "reasoning": duplicate_info["reasoning"],
-            "parsed_title": parsed.title,
-            "parsed_author": parsed.author,
-        }
+    book = _import_book(db, file_bytes, file.filename)
 
-    # Store epub file
-    epub_path = os.path.join(EPUB_STORAGE, f"{content_hash}.epub")
-    with open(epub_path, "wb") as f:
-        f.write(file_bytes)
-
-    # Save to DB
-    book = Book(
-        title=parsed.title,
-        author=parsed.author,
-        filename=file.filename,
-        content_hash=content_hash,
-        total_chapters=len(parsed.chapters),
-        generation_status="pending",
-    )
-    db.add(book)
-    db.flush()
-
-    for ch in parsed.chapters:
-        chapter = Chapter(
-            book_id=book.id,
-            number=ch.number,
-            title=ch.title,
-            raw_text=ch.raw_text,
-        )
-        db.add(chapter)
-
-    db.commit()
-    book_id = book.id
-
-    # Kick off background generation
     if api_key:
-        background_tasks.add_task(_run_generation, book_id)
-    else:
-        book.generation_status = "pending"
-        db.commit()
+        background_tasks.add_task(_run_generation, book.id)
 
-    return {"status": "imported", "book_id": book_id, "title": parsed.title}
+    return {"status": "imported", "book_id": book.id, "title": book.title}
 
 
 @router.post("/upload/confirm-duplicate")
@@ -142,45 +145,13 @@ async def confirm_duplicate_upload(
     if not file_bytes_hex:
         raise HTTPException(400, "file_bytes_hex required")
 
-    file_bytes = bytes.fromhex(file_bytes_hex)
-    content_hash = compute_hash(file_bytes)
+    book = _import_book(db, bytes.fromhex(file_bytes_hex), original_filename)
 
-    try:
-        parsed = parse_epub(file_bytes)
-    except Exception as e:
-        raise HTTPException(400, f"Failed to parse EPUB: {e}")
+    api_key, _ = _get_api_settings(db)
+    if api_key:
+        background_tasks.add_task(_run_generation, book.id)
 
-    epub_path = os.path.join(EPUB_STORAGE, f"{content_hash}.epub")
-    with open(epub_path, "wb") as f:
-        f.write(file_bytes)
-
-    book = Book(
-        title=parsed.title,
-        author=parsed.author,
-        filename=original_filename,
-        content_hash=content_hash,
-        total_chapters=len(parsed.chapters),
-        generation_status="pending",
-    )
-    db.add(book)
-    db.flush()
-
-    for ch in parsed.chapters:
-        db.add(Chapter(
-            book_id=book.id,
-            number=ch.number,
-            title=ch.title,
-            raw_text=ch.raw_text,
-        ))
-
-    db.commit()
-    book_id = book.id
-
-    api_key_setting = db.query(Setting).filter_by(key="openrouter_api_key").first()
-    if api_key_setting and api_key_setting.value:
-        background_tasks.add_task(_run_generation, book_id)
-
-    return {"status": "imported", "book_id": book_id, "title": parsed.title}
+    return {"status": "imported", "book_id": book.id, "title": book.title}
 
 
 @router.post("/{book_id}/regenerate")
@@ -193,12 +164,10 @@ async def regenerate_wiki(
     if not book:
         raise HTTPException(404, "Book not found")
 
-    api_key_setting = db.query(Setting).filter_by(key="openrouter_api_key").first()
-    if not api_key_setting or not api_key_setting.value:
+    api_key, _ = _get_api_settings(db)
+    if not api_key:
         raise HTTPException(400, "OpenRouter API key not configured")
 
-    # Clear existing wiki data and reset chapter classification
-    from database import WikiPage, Chapter
     db.query(WikiPage).filter_by(book_id=book_id).delete()
     db.query(Chapter).filter_by(book_id=book_id).update({"is_story_chapter": None})
     book.generation_status = "pending"
@@ -242,8 +211,8 @@ async def continue_processing(
     if book.generation_status not in ("waiting", "pending"):
         raise HTTPException(400, f"Book is not waiting for continuation (status: {book.generation_status})")
 
-    api_key_setting = db.query(Setting).filter_by(key="openrouter_api_key").first()
-    if not api_key_setting or not api_key_setting.value:
+    api_key, _ = _get_api_settings(db)
+    if not api_key:
         raise HTTPException(400, "OpenRouter API key not configured")
 
     background_tasks.add_task(_run_generation, book_id)
@@ -286,7 +255,6 @@ def update_series(series_id: int, body: SeriesCreate, db: Session = Depends(get_
     series = db.query(Series).filter_by(id=series_id).first()
     if not series:
         raise HTTPException(404, "Series not found")
-    # Remove old associations
     old_books = db.query(Book).filter_by(series_id=series_id).all()
     for b in old_books:
         b.series_id = None

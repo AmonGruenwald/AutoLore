@@ -2,6 +2,7 @@ from sqlalchemy import (
     create_engine, Column, Integer, String, Text, ForeignKey,
     DateTime, JSON, Boolean, Float, event
 )
+from sqlalchemy import text as _text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 import os
@@ -131,5 +132,3 @@ def _run_migrations():
             except Exception:
                 pass  # column already exists — safe to ignore
 
-
-from sqlalchemy import text as _text
