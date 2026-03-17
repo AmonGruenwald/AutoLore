@@ -67,9 +67,10 @@ class Chapter(Base):
     __tablename__ = "chapters"
     id = Column(Integer, primary_key=True)
     book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
-    number = Column(Integer, nullable=False)  # 1-indexed
+    number = Column(Integer, nullable=False)  # 1-indexed, original epub order
     title = Column(String, default="")
     raw_text = Column(Text, nullable=False)
+    is_story_chapter = Column(Boolean, nullable=True)  # None = unclassified
 
     book = relationship("Book", back_populates="chapters")
 
@@ -116,6 +117,7 @@ def _run_migrations():
     """Apply any schema changes that create_all won't handle on existing databases."""
     migrations = [
         "ALTER TABLE books ADD COLUMN generation_step TEXT",
+        "ALTER TABLE chapters ADD COLUMN is_story_chapter INTEGER",
     ]
     with engine.connect() as conn:
         for sql in migrations:

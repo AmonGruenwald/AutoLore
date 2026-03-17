@@ -44,6 +44,45 @@ async def _call_openrouter(
 
 
 
+async def classify_story_chapters(
+    api_key: str,
+    model: str,
+    chapters: list[dict],
+) -> list[bool]:
+    """
+    Given a list of chapter dicts with 'number', 'title', and 'preview' (first ~200 chars),
+    returns a list of booleans — True if the chapter is part of the story, False if it is
+    supplementary material (author bios, acknowledgements, glossary, appendix, maps, etc.).
+    """
+    chapter_list = "\n".join(
+        f"{i+1}. [{c['title']}] {c['preview']}"
+        for i, c in enumerate(chapters)
+    )
+    prompt = f"""Below is a numbered list of chapters from a book. Each entry shows the chapter title and its opening text.
+
+{chapter_list}
+
+Decide for each chapter whether it is part of the actual story/narrative (true) or supplementary material (false).
+Supplementary material includes: author biographical notes, acknowledgements, dedications, maps/figures lists, glossary, appendix, bibliography, endnotes, copyright pages, "about the author" sections, publisher notes, and any other non-narrative content.
+Prologues, epilogues, interludes, and chapters with story content should be marked true.
+
+Respond with ONLY a JSON array of booleans, one per chapter, in order. Example for 4 chapters: [true, true, false, true]"""
+
+    raw = await _call_openrouter(api_key, model, [{"role": "user", "content": prompt}], temperature=0.0)
+    # Extract the JSON array from the response
+    match = re.search(r'\[[\s\S]*\]', raw)
+    if not match:
+        # If parsing fails, default everything to true
+        return [True] * len(chapters)
+    try:
+        result = json.loads(match.group())
+        if len(result) != len(chapters):
+            return [True] * len(chapters)
+        return [bool(v) for v in result]
+    except Exception:
+        return [True] * len(chapters)
+
+
 async def generate_chapter_summary(
     api_key: str,
     model: str,

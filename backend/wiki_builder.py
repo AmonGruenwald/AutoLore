@@ -11,7 +11,7 @@ import asyncio
 import re
 from sqlalchemy.orm import Session
 from database import Book, Chapter, WikiPage, WikiPageVersion, Setting
-from ai_service import generate_chapter_summary, generate_entity_page, _slugify
+from ai_service import classify_story_chapters, generate_chapter_summary, generate_entity_page, _slugify
 
 
 async def _get_settings(db: Session) -> tuple[str, str]:
@@ -53,15 +53,14 @@ def _latest_version_content(page: WikiPage) -> str:
     return max(page.versions, key=lambda v: v.first_visible_chapter).content_markdown
 
 
-def _get_previous_summaries(db: Session, book_id: int, before_chapter: int) -> list[dict]:
-    """Reconstruct previous_summaries from stored summary wiki pages."""
+def _get_previous_summaries(db: Session, book_id: int) -> list[dict]:
+    """Reconstruct previous_summaries from all stored summary wiki pages."""
     summary_pages = db.query(WikiPage).filter_by(book_id=book_id, page_type="summary").all()
     result = []
     for page in summary_pages:
-        visible = [v for v in page.versions if v.first_visible_chapter < before_chapter]
-        if not visible:
+        if not page.versions:
             continue
-        latest = max(visible, key=lambda v: v.first_visible_chapter)
+        latest = max(page.versions, key=lambda v: v.first_visible_chapter)
         result.append({"number": latest.first_visible_chapter, "summary": latest.content_markdown})
     result.sort(key=lambda x: x["number"])
     return result
@@ -101,31 +100,58 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
 
         api_key, model = await _get_settings(db)
 
-        chapters = (
+        all_chapters = (
             db.query(Chapter)
             .filter_by(book_id=book_id)
             .order_by(Chapter.number)
             .all()
         )
-        total = len(chapters)
+
+        # On the very first call, classify which chapters are part of the story.
+        if book.generation_progress == 0 and any(c.is_story_chapter is None for c in all_chapters):
+            book.generation_step = "Identifying story chapters…"
+            db.commit()
+
+            to_classify = [
+                {
+                    "number": c.number,
+                    "title": c.title,
+                    "preview": c.raw_text[:200].strip(),
+                }
+                for c in all_chapters
+            ]
+            flags = await classify_story_chapters(api_key, model, to_classify)
+            for chapter_obj, is_story in zip(all_chapters, flags):
+                chapter_obj.is_story_chapter = is_story
+            db.commit()
+
+        # Work only with story chapters, in order
+        story_chapters = [c for c in all_chapters if c.is_story_chapter]
+        total = len(story_chapters)
 
         if total == 0:
             book.generation_status = "done"
             book.generation_step = None
+            book.total_chapters = 0
             db.commit()
             return
 
-        # Pick up from where we left off
-        next_number = book.generation_progress + 1
-        chapter = next((c for c in chapters if c.number == next_number), None)
-        if chapter is None:
+        # Keep total_chapters in sync with the story-chapter count
+        book.total_chapters = total
+        db.commit()
+
+        # generation_progress = number of story chapters already processed (0-based index into next)
+        next_idx = book.generation_progress
+        if next_idx >= total:
             book.generation_status = "done"
             book.generation_step = None
             db.commit()
             return
 
-        # Reconstruct context from previous chapters stored in the DB
-        previous_summaries = _get_previous_summaries(db, book_id, next_number)
+        chapter = story_chapters[next_idx]
+
+        # Reconstruct context from previously processed chapters
+        previous_summaries = _get_previous_summaries(db, book_id)
         entity_info = _get_entity_info(db, book_id)
 
         chapter_dict = {
@@ -223,9 +249,9 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                 ))
             db.commit()
 
-        book.generation_progress = chapter.number
+        book.generation_progress = next_idx + 1
         book.generation_step = None
-        book.generation_status = "done" if chapter.number >= total else "waiting"
+        book.generation_status = "done" if (next_idx + 1) >= total else "waiting"
         db.commit()
 
     except Exception as e:
