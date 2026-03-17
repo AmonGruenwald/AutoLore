@@ -1,4 +1,4 @@
-import { Loader2, CheckCircle, AlertCircle, Clock } from 'lucide-react'
+import { Loader2, CheckCircle, AlertCircle, Clock, PauseCircle } from 'lucide-react'
 import type { Book } from '../lib/api'
 
 interface Props {
@@ -20,6 +20,14 @@ export default function GenerationStatus({ book }: Props) {
     return (
       <span className="flex items-center gap-1 text-red-600 text-xs">
         <AlertCircle size={12} /> Generation failed
+      </span>
+    )
+  }
+
+  if (status === 'waiting') {
+    return (
+      <span className="flex items-center gap-1 text-amber-600 text-xs whitespace-nowrap">
+        <PauseCircle size={12} /> Ch. {progress}/{total_chapters}
       </span>
     )
   }

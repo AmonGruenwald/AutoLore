@@ -209,6 +209,27 @@ async def regenerate_wiki(
     return {"ok": True}
 
 
+@router.post("/{book_id}/continue")
+async def continue_processing(
+    book_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Process the next chapter for a book that is in 'waiting' state."""
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+    if book.generation_status not in ("waiting", "pending"):
+        raise HTTPException(400, f"Book is not waiting for continuation (status: {book.generation_status})")
+
+    api_key_setting = db.query(Setting).filter_by(key="openrouter_api_key").first()
+    if not api_key_setting or not api_key_setting.value:
+        raise HTTPException(400, "OpenRouter API key not configured")
+
+    background_tasks.add_task(_run_generation, book_id)
+    return {"ok": True}
+
+
 async def _run_generation(book_id: int):
     await build_wiki_for_book(book_id, _db_factory)
 

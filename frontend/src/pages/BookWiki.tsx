@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu } from 'lucide-react'
-import { getBook, getWikiPages, getWikiPage, deleteBook } from '../lib/api'
+import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight } from 'lucide-react'
+import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing } from '../lib/api'
 import type { BookDetail, WikiPageList, WikiPageContent } from '../lib/api'
 import ChapterSlider from '../components/ChapterSlider'
 import WikiSidebar from '../components/WikiSidebar'
@@ -21,6 +21,8 @@ export default function BookWiki() {
   const [loadingPage, setLoadingPage] = useState(false)
   const [error, setError] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [autoProcess, setAutoProcess] = useState(false)
+  const [continuing, setContinuing] = useState(false)
 
   // Load book info on mount
   useEffect(() => {
@@ -34,14 +36,13 @@ export default function BookWiki() {
     }).catch(() => setError('Book not found'))
   }, [id])
 
-  // Poll while generating so UI updates as chapters complete
+  // Poll while processing or waiting so the UI stays in sync
   useEffect(() => {
-    if (!book || book.generation_status !== 'processing') return
+    if (!book) return
+    if (book.generation_status !== 'processing' && book.generation_status !== 'waiting') return
     const interval = setInterval(() => {
       getBook(id).then(updated => {
         setBook(prev => {
-          // When a new chapter becomes available, advance the slider if the user
-          // is already at the current frontier (i.e. they haven't scrolled back)
           if (prev && updated.generation_progress > prev.generation_progress) {
             setChapter(c => c === prev.generation_progress ? updated.generation_progress : c)
           }
@@ -52,6 +53,19 @@ export default function BookWiki() {
     return () => clearInterval(interval)
   }, [book?.generation_status, id])
 
+  // Auto-process: when waiting and the toggle is on, kick off the next chapter automatically
+  useEffect(() => {
+    if (!book || book.generation_status !== 'waiting' || !autoProcess) return
+    const t = setTimeout(() => {
+      setContinuing(true)
+      continueProcessing(id)
+        .then(() => getBook(id).then(setBook))
+        .catch(() => {})
+        .finally(() => setContinuing(false))
+    }, 600)
+    return () => clearTimeout(t)
+  }, [book?.generation_status, book?.generation_progress, autoProcess, id])
+
   // Max chapter the user can view right now
   const maxChapter = book
     ? (book.generation_status === 'done' ? book.total_chapters : book.generation_progress)
@@ -60,7 +74,7 @@ export default function BookWiki() {
 
   // Load wiki page list whenever effective chapter or available chapters change
   const canBrowse = book &&
-    (book.generation_status === 'done' || book.generation_status === 'processing') &&
+    (book.generation_status === 'done' || book.generation_status === 'processing' || book.generation_status === 'waiting') &&
     maxChapter >= 1
 
   const loadPages = useCallback(() => {
@@ -89,6 +103,17 @@ export default function BookWiki() {
       .finally(() => setLoadingPage(false))
   }, [id, selectedSlug, effectiveChapter])
 
+  async function handleContinue() {
+    if (!book) return
+    setContinuing(true)
+    try {
+      await continueProcessing(id)
+      getBook(id).then(setBook)
+    } finally {
+      setContinuing(false)
+    }
+  }
+
   async function handleDelete() {
     if (!book || !confirm(`Delete "${book.title}" and its entire wiki?`)) return
     await deleteBook(id)
@@ -110,6 +135,7 @@ export default function BookWiki() {
   }
 
   const isProcessing = book.generation_status === 'processing'
+  const isWaiting = book.generation_status === 'waiting'
   const isPendingOrError = book.generation_status === 'pending' || book.generation_status === 'error'
 
   return (
@@ -144,12 +170,42 @@ export default function BookWiki() {
 
       {/* In-progress banner */}
       {isProcessing && (
-        <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 text-sm text-amber-800 flex items-center gap-2">
+        <div className="bg-amber-50 border-b border-amber-200 px-4 md:px-6 py-2 text-sm text-amber-800 flex items-center gap-2">
           <Loader2 size={13} className="animate-spin shrink-0" />
           <span>
-            Generating — {book.generation_progress} of {book.total_chapters} chapters ready.
+            Processing chapter {book.generation_progress + 1} of {book.total_chapters}…
             {book.generation_step && <span className="text-amber-600"> {book.generation_step}</span>}
           </span>
+        </div>
+      )}
+
+      {/* Waiting banner — chapter done, ready for next */}
+      {isWaiting && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 md:px-6 py-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm text-amber-800">
+            Chapter {book.generation_progress} of {book.total_chapters} done.
+          </span>
+          <div className="flex items-center gap-3 ml-auto">
+            <label className="flex items-center gap-1.5 text-xs text-amber-700 cursor-pointer select-none whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={autoProcess}
+                onChange={e => setAutoProcess(e.target.checked)}
+                className="accent-amber-700"
+              />
+              Process all automatically
+            </label>
+            <button
+              onClick={handleContinue}
+              disabled={continuing}
+              className="flex items-center gap-1 px-3 py-1 text-xs font-medium bg-amber-700 text-parchment-50 rounded hover:bg-amber-800 disabled:opacity-50 whitespace-nowrap"
+            >
+              {continuing
+                ? <Loader2 size={11} className="animate-spin" />
+                : <ChevronRight size={11} />}
+              Process chapter {book.generation_progress + 1}
+            </button>
+          </div>
         </div>
       )}
 

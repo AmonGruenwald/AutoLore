@@ -20,6 +20,9 @@ export const deleteBook = (id: number) =>
 export const regenerateWiki = (id: number) =>
   request(`/books/${id}/regenerate`, { method: 'POST' })
 
+export const continueProcessing = (id: number) =>
+  request(`/books/${id}/continue`, { method: 'POST' })
+
 export async function uploadBook(file: File): Promise<UploadResult> {
   const form = new FormData()
   form.append('file', file)
@@ -72,7 +75,7 @@ export interface Book {
   title: string
   author: string
   total_chapters: number
-  generation_status: 'pending' | 'processing' | 'done' | 'error'
+  generation_status: 'pending' | 'processing' | 'waiting' | 'done' | 'error'
   generation_progress: number
   generation_step: string | null
   series_id: number | null
