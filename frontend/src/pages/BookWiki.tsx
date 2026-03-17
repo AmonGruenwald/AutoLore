@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight } from 'lucide-react'
+import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight, Clock } from 'lucide-react'
 import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing, setStopChapter, deleteWikiPage, mergeWikiPages, updateWikiPage } from '../lib/api'
 import type { BookDetail, WikiPageList, WikiPageContent } from '../lib/api'
 import ChapterSlider from '../components/ChapterSlider'
 import WikiSidebar from '../components/WikiSidebar'
 import WikiPageComponent from '../components/WikiPage'
+import WikiHome from '../components/WikiHome'
 import GenerationStatus from '../components/GenerationStatus'
 
 export default function BookWiki() {
@@ -79,20 +80,30 @@ export default function BookWiki() {
 
   useEffect(() => { loadPages() }, [loadPages])
 
-  useEffect(() => {
-    if (pages && !selectedSlug && pages.summaries.length > 0) {
-      setSelectedSlug(pages.summaries[0].slug)
-    }
-  }, [pages, selectedSlug])
+  // Set of slugs visible at the current chapter
+  const visibleSlugSet = useMemo(() => {
+    if (!pages) return new Set<string>()
+    return new Set([
+      ...pages.summaries.map(p => p.slug),
+      ...pages.characters.map(p => p.slug),
+      ...pages.places.map(p => p.slug),
+      ...pages.events.map(p => p.slug),
+    ])
+  }, [pages])
 
+  // Fetch the selected page — skip if slug isn't visible at this chapter
   useEffect(() => {
     if (!selectedSlug) return
+    if (pages !== null && !visibleSlugSet.has(selectedSlug)) {
+      setCurrentPage(null)
+      return
+    }
     setLoadingPage(true)
     getWikiPage(id, selectedSlug, effectiveChapter)
       .then(setCurrentPage)
       .catch(() => setCurrentPage(null))
       .finally(() => setLoadingPage(false))
-  }, [id, selectedSlug, effectiveChapter])
+  }, [id, selectedSlug, effectiveChapter, visibleSlugSet, pages])
 
   async function handleContinue() {
     if (!book) return
@@ -160,6 +171,12 @@ export default function BookWiki() {
   const isWaiting = book.generation_status === 'waiting'
   const isPendingOrError = book.generation_status === 'pending' || book.generation_status === 'error'
 
+  // Is the selected page known but not yet visible at this chapter?
+  const pageNotYetVisible = selectedSlug !== null && pages !== null && !visibleSlugSet.has(selectedSlug)
+
+  // Title of the selected entity if we can derive it (from currentPage or visibleSlugs)
+  const selectedTitle = currentPage?.title ?? selectedSlug?.replace(/-/g, ' ') ?? ''
+
   return (
     <div className="flex flex-col h-[calc(100vh-48px)]">
 
@@ -193,7 +210,7 @@ export default function BookWiki() {
         </div>
       </div>
 
-      {/* Processing indicator — slim, no heavy background */}
+      {/* Processing indicator */}
       {isProcessing && (
         <div className="px-4 md:px-6 py-1.5 border-b border-parchment-200 flex items-center gap-2 text-xs text-ink-muted shrink-0">
           <Loader2 size={11} className="animate-spin shrink-0 text-amber-600" />
@@ -204,7 +221,7 @@ export default function BookWiki() {
         </div>
       )}
 
-      {/* Waiting — controls, but clean */}
+      {/* Waiting — controls */}
       {isWaiting && (
         <div className="px-4 md:px-6 py-2 border-b border-parchment-200 flex flex-wrap items-center gap-x-4 gap-y-1.5 shrink-0">
           <span className="text-xs text-ink-muted">
@@ -272,7 +289,7 @@ export default function BookWiki() {
             <ChapterSlider
               totalChapters={maxChapter}
               value={effectiveChapter}
-              onChange={c => { setChapter(c); setSelectedSlug(null) }}
+              onChange={c => setChapter(c)}
               chapterTitles={book.chapters}
             />
           )}
@@ -296,6 +313,7 @@ export default function BookWiki() {
                   pages={pages}
                   selectedSlug={selectedSlug}
                   onSelect={slug => { setSelectedSlug(slug); setSidebarOpen(false) }}
+                  onHome={() => { setSelectedSlug(null); setSidebarOpen(false) }}
                 />
               ) : (
                 <div className="p-4 text-center">
@@ -305,20 +323,45 @@ export default function BookWiki() {
             </aside>
 
             <main className="flex-1 overflow-y-auto p-5 md:p-10">
-              {loadingPage ? (
+              {/* Home / overview */}
+              {!selectedSlug && book && (
+                <WikiHome
+                  book={book}
+                  pages={pages}
+                  effectiveChapter={effectiveChapter}
+                  onNavigate={setSelectedSlug}
+                />
+              )}
+
+              {/* Page not yet visible at this chapter */}
+              {pageNotYetVisible && (
+                <div className="flex flex-col items-center justify-center pt-24 text-center gap-3">
+                  <Clock size={32} className="text-ink-muted/30" />
+                  <p className="text-sm font-medium text-ink-muted">
+                    {selectedTitle
+                      ? <><span className="capitalize">{selectedTitle}</span> hasn&apos;t appeared yet</>
+                      : "This page hasn\u2019t appeared yet"}
+                  </p>
+                  <p className="text-xs text-ink-muted/60 max-w-xs">
+                    This entry hasn&apos;t been written at chapter {effectiveChapter}.
+                    Move the slider forward to reveal it.
+                  </p>
+                </div>
+              )}
+
+              {/* Loading */}
+              {selectedSlug && !pageNotYetVisible && loadingPage && (
                 <div className="flex justify-center pt-16">
                   <Loader2 size={20} className="animate-spin text-ink-muted" />
                 </div>
-              ) : currentPage ? (
+              )}
+
+              {/* Page content */}
+              {selectedSlug && !pageNotYetVisible && !loadingPage && currentPage && (
                 <WikiPageComponent
                   page={currentPage}
                   onNavigate={setSelectedSlug}
-                  visibleSlugs={pages ? new Set([
-                    ...pages.summaries.map(p => p.slug),
-                    ...pages.characters.map(p => p.slug),
-                    ...pages.places.map(p => p.slug),
-                    ...pages.events.map(p => p.slug),
-                  ]) : undefined}
+                  visibleSlugs={visibleSlugSet}
                   sameTypePages={pages ? [
                     ...pages.summaries,
                     ...pages.characters,
@@ -330,7 +373,10 @@ export default function BookWiki() {
                   onEdit={handleEditPage}
                   merging={merging}
                 />
-              ) : (
+              )}
+
+              {/* Fallback — page loaded but empty */}
+              {selectedSlug && !pageNotYetVisible && !loadingPage && !currentPage && (
                 <div className="text-center text-ink-muted pt-16 text-sm">
                   {isProcessing && maxChapter < 1
                     ? 'First chapter still processing…'

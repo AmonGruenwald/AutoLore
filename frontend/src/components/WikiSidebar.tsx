@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, User, MapPin, Zap, BookOpenCheck } from 'lucide-react'
+import { ChevronDown, ChevronRight, User, MapPin, Zap, BookOpenCheck, LayoutDashboard } from 'lucide-react'
 import type { WikiPageList, WikiPageSummary } from '../lib/api'
 
 interface Props {
   pages: WikiPageList
   selectedSlug: string | null
   onSelect: (slug: string, bookId?: number) => void
+  onHome: () => void
 }
 
 type Section = 'summaries' | 'characters' | 'places' | 'events'
@@ -61,27 +62,36 @@ function SidebarSection({ section, items, selectedSlug, onSelect }: {
   )
 }
 
-export default function WikiSidebar({ pages, selectedSlug, onSelect }: Props) {
+export default function WikiSidebar({ pages, selectedSlug, onSelect, onHome }: Props) {
   const sections: Section[] = ['summaries', 'characters', 'places', 'events']
   const total = sections.reduce((n, s) => n + pages[s].length, 0)
 
-  if (total === 0) {
-    return (
-      <p className="px-4 py-3 text-xs text-ink-muted italic">No pages yet.</p>
-    )
-  }
-
   return (
     <nav>
-      {sections.map(section => (
-        <SidebarSection
-          key={section}
-          section={section}
-          items={pages[section]}
-          selectedSlug={selectedSlug}
-          onSelect={onSelect}
-        />
-      ))}
+      {/* Home / overview button */}
+      <div className="px-1.5 pb-1 mb-1 border-b border-parchment-200">
+        <button
+          onClick={onHome}
+          className={`sidebar-item flex items-center gap-1.5 ${selectedSlug === null ? 'sidebar-item-active' : 'text-ink-muted'}`}
+        >
+          <LayoutDashboard size={11} />
+          Overview
+        </button>
+      </div>
+
+      {total === 0 ? (
+        <p className="px-4 py-3 text-xs text-ink-muted italic">No pages yet.</p>
+      ) : (
+        sections.map(section => (
+          <SidebarSection
+            key={section}
+            section={section}
+            items={pages[section]}
+            selectedSlug={selectedSlug}
+            onSelect={onSelect}
+          />
+        ))
+      )}
     </nav>
   )
 }
