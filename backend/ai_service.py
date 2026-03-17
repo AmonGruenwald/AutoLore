@@ -24,7 +24,11 @@ async def _call_openrouter(
     model: str,
     messages: list[dict],
     temperature: float = 0.2,
+    max_tokens: int | None = None,
 ) -> str:
+    body: dict = {"model": model, "messages": messages, "temperature": temperature}
+    if max_tokens is not None:
+        body["max_tokens"] = max_tokens
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(
             f"{OPENROUTER_BASE}/chat/completions",
@@ -34,15 +38,44 @@ async def _call_openrouter(
                 "HTTP-Referer": "http://localhost",
                 "X-Title": "AutoLore",
             },
-            json={
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-            },
+            json=body,
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
 
+
+
+async def _classify_single_chapter(
+    api_key: str,
+    model: str,
+    chapter: dict,
+    semaphore: asyncio.Semaphore,
+) -> bool:
+    """Classify one chapter as story (True) or supplementary (False)."""
+    prompt = f"""Is this book chapter part of the story, or is it supplementary material?
+
+Opening text: {chapter['preview']}
+Title: {chapter['title']}
+
+Supplementary (false): author bio, acknowledgements, dedications, publisher/series announcements,
+glossary, appendix, bibliography, copyright. These discuss the real author or real-world publishing.
+
+Story (true): fictional narrative — characters, dialogue, events, worldbuilding.
+Prologues, epilogues, and interludes with narrative content are story.
+
+Judge by the opening text above, not the title. Answer with one word: true or false"""
+
+    async with semaphore:
+        try:
+            raw = await _call_openrouter(
+                api_key, model,
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=5,
+            )
+            return raw.strip().lower().startswith("true")
+        except Exception:
+            return True
 
 
 async def classify_story_chapters(
@@ -51,46 +84,14 @@ async def classify_story_chapters(
     chapters: list[dict],
 ) -> list[bool]:
     """
-    Given a list of chapter dicts with 'number', 'title', and 'preview',
-    returns a list of booleans — True if the chapter is part of the story, False if
-    supplementary (author bios, acknowledgements, glossary, appendix, etc.).
+    Classify each chapter individually in parallel.
+    Returns a list of booleans — True = story, False = supplementary.
     """
-    # List opening text before title so the model judges content, not title wording
-    chapter_list = "\n".join(
-        f"{i+1}. Opening text: \"{c['preview']}\" | Title: {c['title']}"
-        for i, c in enumerate(chapters)
+    semaphore = asyncio.Semaphore(8)
+    results = await asyncio.gather(
+        *[_classify_single_chapter(api_key, model, c, semaphore) for c in chapters]
     )
-    prompt = f"""Classify each of the {len(chapters)} chapters below as story (true) or supplementary (false).
-
-For each entry, read the OPENING TEXT first — the title may be misleading.
-
-SUPPLEMENTARY → false:
-- Opening text discusses the real author (their life, education, other books they wrote)
-- Publisher or series announcements, upcoming releases
-- Acknowledgements, dedications, copyright, glossary, appendix, bibliography
-
-STORY → true:
-- Opening text is narrative fiction: characters, dialogue, events, worldbuilding
-- Prologues, epilogues, interludes with fictional content
-
-{chapter_list}
-
-Output ONLY a JSON array of {len(chapters)} booleans in order, e.g. [true, false, true]"""
-
-    raw = await _call_openrouter(api_key, model, [{"role": "user", "content": prompt}], temperature=0.0)
-    match = re.search(r'\[[\s\S]*\]', raw)
-    if not match:
-        return [True] * len(chapters)
-    try:
-        result = json.loads(match.group())
-        if len(result) == len(chapters):
-            return [bool(v) for v in result]
-        # Salvage wrong-length response
-        if len(result) > len(chapters):
-            return [bool(v) for v in result[:len(chapters)]]
-        return [bool(v) for v in result] + [True] * (len(chapters) - len(result))
-    except Exception:
-        return [True] * len(chapters)
+    return list(results)
 
 
 async def generate_chapter_summary(
@@ -146,7 +147,7 @@ Output format:
         {"role": "user", "content": prompt},
     ]
 
-    raw = await _call_openrouter(api_key, model, messages)
+    raw = await _call_openrouter(api_key, model, messages, max_tokens=1200)
     return _parse_summary_response(raw, chapter["number"])
 
 
@@ -240,7 +241,7 @@ Extract ONLY information about "{entity_name}" and write a wiki page covering: {
         {"role": "user", "content": prompt},
     ]
 
-    return await _call_openrouter(api_key, model, messages)
+    return await _call_openrouter(api_key, model, messages, max_tokens=800)
 
 
 async def resolve_entity_aliases(
@@ -300,7 +301,7 @@ canonical known name (string) or null if it is new:
         {"role": "system", "content": "You are a precise JSON-only responder."},
         {"role": "user", "content": prompt},
     ]
-    raw = await _call_openrouter(api_key, model, messages)
+    raw = await _call_openrouter(api_key, model, messages, max_tokens=300)
     # Strip markdown fences if present
     raw = re.sub(r"^```[a-z]*\n?", "", raw.strip(), flags=re.MULTILINE)
     raw = re.sub(r"\n?```$", "", raw.strip(), flags=re.MULTILINE)
