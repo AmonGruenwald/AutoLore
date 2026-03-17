@@ -32,7 +32,7 @@ export default function Home() {
 
   // Poll while any book is processing or pending (pending may transition to processing)
   useEffect(() => {
-    const isProcessing = books.some(b => b.generation_status === 'processing' || b.generation_status === 'pending')
+    const isProcessing = books.some(b => b.generation_status === 'processing' || b.generation_status === 'pending' || b.generation_status === 'waiting')
     if (isProcessing && !pollingRef.current) {
       pollingRef.current = setInterval(load, 3000)
     } else if (!isProcessing && pollingRef.current) {
@@ -264,7 +264,7 @@ function BookCard({
       <div className="flex gap-1.5 mt-3">
         <button
           onClick={onOpen}
-          disabled={book.generation_status !== 'done' && book.generation_status !== 'processing'}
+          disabled={book.generation_status !== 'done' && book.generation_status !== 'processing' && book.generation_status !== 'waiting'}
           className="flex-1 text-xs py-1.5 rounded bg-ink text-parchment-100 hover:bg-ink-light disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Open Wiki
