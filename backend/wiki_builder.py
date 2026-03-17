@@ -53,20 +53,50 @@ def _latest_version_content(page: WikiPage) -> str:
     return max(page.versions, key=lambda v: v.first_visible_chapter).content_markdown
 
 
-_GENERIC_TITLE_RE = re.compile(
-    r"^(chapter|part|book|prologue|epilogue|interlude|section|volume|act)\s*[\divxlcdmIVXLCDM]*\.?\s*$",
+_NUMBERED_CHAPTER_RE = re.compile(
+    r"^(?:chapter|part|book|section|volume|act)\s+([IVXLCDM]+|\d+)\.?\s*$",
     re.IGNORECASE,
 )
 
-def _is_generic_title(title: str) -> bool:
-    """Return True if the epub chapter title is too generic to be useful."""
+
+def _roman_to_int(s: str) -> int:
+    vals = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+    result, prev = 0, 0
+    for ch in reversed(s.lower()):
+        v = vals.get(ch, 0)
+        result += v if v >= prev else -v
+        prev = v
+    return result
+
+
+def _is_faulty_title(title: str, story_chapter_idx: int) -> bool:
+    """
+    Return True when the epub title should be replaced by the AI-generated one.
+
+    Faulty cases:
+      - Empty or very short (likely missing metadata)
+      - Pure number / roman numeral with no label
+      - Numbered chapter label ("Chapter 5") whose number doesn't match
+        the story chapter index — happens when epub chapters are skipped
+        (poems, prefaces, etc.) so the numbering shifts
+    Kept as-is:
+      - Numbered label that matches the story index ("Chapter 1" == story ch 1)
+      - Un-numbered labels like "Prologue", "Epilogue", "Interlude"
+      - Any real descriptive title
+    """
     t = title.strip()
     if not t or len(t) < 3:
         return True
-    # Pure number or roman numeral
+    # Pure number or roman numeral — no real title at all
     if re.match(r"^[\divxlcdmIVXLCDM\s\.]+$", t):
         return True
-    return bool(_GENERIC_TITLE_RE.match(t))
+    # "Chapter N" / "Part N" etc. — check if the number is consistent
+    m = _NUMBERED_CHAPTER_RE.match(t)
+    if m:
+        num_str = m.group(1)
+        num = int(num_str) if num_str.isdigit() else _roman_to_int(num_str)
+        return num != story_chapter_idx
+    return False
 
 
 def _get_previous_summaries(db: Session, book_id: int) -> list[dict]:
@@ -192,7 +222,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
         summary_md = result["summary"]
         entities_in_chapter = result["entities"]
         ai_title = result.get("clean_title")
-        clean_title = ai_title if (ai_title and _is_generic_title(chapter.title)) else chapter.title
+        clean_title = (ai_title or chapter.title) if _is_faulty_title(chapter.title, story_chapter_idx) else chapter.title
 
         # Persist the AI-generated title on the chapter row
         chapter.clean_title = clean_title
