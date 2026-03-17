@@ -264,7 +264,7 @@ function BookCard({
       <div className="flex gap-1.5 mt-3">
         <button
           onClick={onOpen}
-          disabled={book.generation_status !== 'done'}
+          disabled={book.generation_status !== 'done' && book.generation_status !== 'processing'}
           className="flex-1 text-xs py-1.5 rounded bg-ink text-parchment-100 hover:bg-ink-light disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Open Wiki

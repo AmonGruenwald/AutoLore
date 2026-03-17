@@ -21,21 +21,57 @@ export default function BookWiki() {
   const [loadingPage, setLoadingPage] = useState(false)
   const [error, setError] = useState('')
 
-  // Load book info
+  // Load book info on mount
   useEffect(() => {
     getBook(id).then(b => {
       setBook(b)
-      setChapter(b.total_chapters) // default: fully read
+      // Default to last available chapter
+      const defaultChapter = b.generation_status === 'done'
+        ? b.total_chapters
+        : b.generation_progress
+      setChapter(Math.max(1, defaultChapter))
     }).catch(() => setError('Book not found'))
   }, [id])
 
-  // Load wiki page list whenever chapter changes
+  // Poll while generating so UI updates as chapters complete
   useEffect(() => {
-    if (!book || book.generation_status !== 'done') return
-    getWikiPages(id, chapter).then(setPages)
-  }, [id, chapter, book])
+    if (!book || book.generation_status !== 'processing') return
+    const interval = setInterval(() => {
+      getBook(id).then(updated => {
+        setBook(prev => {
+          // When a new chapter becomes available, advance the slider if the user
+          // is already at the current frontier (i.e. they haven't scrolled back)
+          if (prev && updated.generation_progress > prev.generation_progress) {
+            setChapter(c => c === prev.generation_progress ? updated.generation_progress : c)
+          }
+          return updated
+        })
+      })
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [book?.generation_status, id])
 
-  // Auto-select first summary on load
+  // Max chapter the user can view right now
+  const maxChapter = book
+    ? (book.generation_status === 'done' ? book.total_chapters : book.generation_progress)
+    : 1
+  const effectiveChapter = Math.min(chapter, Math.max(1, maxChapter))
+
+  // Load wiki page list whenever effective chapter or available chapters change
+  const canBrowse = book &&
+    (book.generation_status === 'done' || book.generation_status === 'processing') &&
+    maxChapter >= 1
+
+  const loadPages = useCallback(() => {
+    if (!canBrowse) return
+    getWikiPages(id, effectiveChapter).then(setPages)
+  }, [id, effectiveChapter, canBrowse])
+
+  useEffect(() => {
+    loadPages()
+  }, [loadPages])
+
+  // Auto-select first summary on initial load
   useEffect(() => {
     if (pages && !selectedSlug && pages.summaries.length > 0) {
       setSelectedSlug(pages.summaries[0].slug)
@@ -46,20 +82,16 @@ export default function BookWiki() {
   useEffect(() => {
     if (!selectedSlug) return
     setLoadingPage(true)
-    getWikiPage(id, selectedSlug, chapter)
+    getWikiPage(id, selectedSlug, effectiveChapter)
       .then(setCurrentPage)
       .catch(() => setCurrentPage(null))
       .finally(() => setLoadingPage(false))
-  }, [id, selectedSlug, chapter])
+  }, [id, selectedSlug, effectiveChapter])
 
   async function handleDelete() {
     if (!book || !confirm(`Delete "${book.title}" and its entire wiki?`)) return
     await deleteBook(id)
     navigate('/')
-  }
-
-  function handleNavigate(slug: string) {
-    setSelectedSlug(slug)
   }
 
   if (error) {
@@ -76,9 +108,12 @@ export default function BookWiki() {
     return <div className="p-8 text-center"><Loader2 size={24} className="animate-spin mx-auto" /></div>
   }
 
+  const isProcessing = book.generation_status === 'processing'
+  const isPendingOrError = book.generation_status === 'pending' || book.generation_status === 'error'
+
   return (
     <div className="flex flex-col h-[calc(100vh-48px)]">
-      {/* Book header + progress */}
+      {/* Book header */}
       <div className="bg-parchment-50 border-b border-parchment-300 px-6 py-3">
         <div className="flex items-center gap-3">
           <button onClick={() => navigate('/')} className="text-ink-muted hover:text-ink">
@@ -99,16 +134,19 @@ export default function BookWiki() {
         </div>
       </div>
 
-      {book.generation_status === 'done' && (
-        <ChapterSlider
-          totalChapters={book.total_chapters}
-          value={chapter}
-          onChange={c => { setChapter(c); setSelectedSlug(null) }}
-          chapterTitles={book.chapters}
-        />
+      {/* In-progress banner */}
+      {isProcessing && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 text-sm text-amber-800 flex items-center gap-2">
+          <Loader2 size={13} className="animate-spin shrink-0" />
+          <span>
+            Generating — {book.generation_progress} of {book.total_chapters} chapters ready.
+            {book.generation_step && <span className="text-amber-600"> {book.generation_step}</span>}
+          </span>
+        </div>
       )}
 
-      {book.generation_status !== 'done' ? (
+      {/* Pending / error: centred message */}
+      {isPendingOrError ? (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center text-ink-muted">
             {book.generation_status === 'error' ? (
@@ -120,40 +158,52 @@ export default function BookWiki() {
             ) : (
               <>
                 <Loader2 size={32} className="animate-spin mx-auto mb-2" />
-                <p>Wiki is being generated...</p>
-                <p className="text-sm mt-1">{book.generation_progress}/{book.total_chapters} chapters processed</p>
+                <p>Waiting to generate — configure an API key in Settings.</p>
               </>
             )}
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden">
-          {/* Sidebar */}
-          <aside className="w-56 border-r border-parchment-300 bg-parchment-50 overflow-y-auto shrink-0 py-2">
-            {pages ? (
-              <WikiSidebar
-                pages={pages}
-                selectedSlug={selectedSlug}
-                onSelect={setSelectedSlug}
-              />
-            ) : (
-              <div className="p-4 text-center"><Loader2 size={16} className="animate-spin mx-auto" /></div>
-            )}
-          </aside>
+        <>
+          {maxChapter >= 1 && (
+            <ChapterSlider
+              totalChapters={maxChapter}
+              value={effectiveChapter}
+              onChange={c => { setChapter(c); setSelectedSlug(null) }}
+              chapterTitles={book.chapters}
+            />
+          )}
 
-          {/* Main content */}
-          <main className="flex-1 overflow-y-auto p-8">
-            {loadingPage ? (
-              <div className="flex justify-center pt-16"><Loader2 size={24} className="animate-spin" /></div>
-            ) : currentPage ? (
-              <WikiPageComponent page={currentPage} onNavigate={handleNavigate} />
-            ) : (
-              <div className="text-center text-ink-muted pt-16">
-                <p>Select a page from the sidebar.</p>
-              </div>
-            )}
-          </main>
-        </div>
+          <div className="flex flex-1 overflow-hidden">
+            {/* Sidebar */}
+            <aside className="w-56 border-r border-parchment-300 bg-parchment-50 overflow-y-auto shrink-0 py-2">
+              {pages ? (
+                <WikiSidebar
+                  pages={pages}
+                  selectedSlug={selectedSlug}
+                  onSelect={setSelectedSlug}
+                />
+              ) : (
+                <div className="p-4 text-center"><Loader2 size={16} className="animate-spin mx-auto" /></div>
+              )}
+            </aside>
+
+            {/* Main content */}
+            <main className="flex-1 overflow-y-auto p-8">
+              {loadingPage ? (
+                <div className="flex justify-center pt-16"><Loader2 size={24} className="animate-spin" /></div>
+              ) : currentPage ? (
+                <WikiPageComponent page={currentPage} onNavigate={setSelectedSlug} />
+              ) : (
+                <div className="text-center text-ink-muted pt-16">
+                  {isProcessing && maxChapter < 1
+                    ? <p>First chapter still processing...</p>
+                    : <p>Select a page from the sidebar.</p>}
+                </div>
+              )}
+            </main>
+          </div>
+        </>
       )}
     </div>
   )
