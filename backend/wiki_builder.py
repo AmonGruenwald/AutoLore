@@ -83,7 +83,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             }
 
             # 1. Generate chapter summary
-            book.generation_step = f"Summarising chapter {chapter.number}: "{chapter.title}""
+            book.generation_step = f'Summarising chapter {chapter.number}: "{chapter.title}"'
             db.commit()
             try:
                 result = await generate_chapter_summary(
@@ -132,7 +132,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                 existing_page = _get_or_create_wiki_page(db, book_id, info["type"], info["name"])
                 existing_content = _latest_version_content(existing_page)
 
-                book.generation_step = f"Updating {info['type']} page: "{info['name']}""
+                book.generation_step = f'Updating {info["type"]} page: "{info["name"]}"'
                 db.commit()
                 try:
                     new_content = await generate_entity_page(
