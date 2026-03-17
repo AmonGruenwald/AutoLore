@@ -210,6 +210,25 @@ async def regenerate_wiki(
     return {"ok": True}
 
 
+class StopChapterBody(BaseModel):
+    stop_chapter: int | None  # 1-based story-chapter index; None clears the stop point
+
+
+@router.patch("/{book_id}/stop-chapter")
+def set_stop_chapter(
+    book_id: int,
+    body: StopChapterBody,
+    db: Session = Depends(get_db),
+):
+    """Set (or clear) the chapter at which processing should pause."""
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+    book.stop_chapter = body.stop_chapter
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/{book_id}/continue")
 async def continue_processing(
     book_id: int,
@@ -310,6 +329,7 @@ def _book_summary(book: Book) -> dict:
         "generation_step": book.generation_step,
         "series_id": book.series_id,
         "series_order": book.series_order,
+        "stop_chapter": book.stop_chapter,
         "created_at": book.created_at.isoformat() if book.created_at else None,
     }
 

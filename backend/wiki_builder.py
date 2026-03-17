@@ -346,9 +346,16 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                 ))
             db.commit()
 
-        book.generation_progress = next_idx + 1
+        new_progress = next_idx + 1
+        book.generation_progress = new_progress
         book.generation_step = None
-        book.generation_status = "done" if (next_idx + 1) >= total else "waiting"
+        if new_progress >= total:
+            book.generation_status = "done"
+        elif book.stop_chapter is not None and new_progress >= book.stop_chapter:
+            book.generation_status = "waiting"
+            book.stop_chapter = None  # clear so resuming works normally
+        else:
+            book.generation_status = "waiting"
         db.commit()
 
     except Exception as e:

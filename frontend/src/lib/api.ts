@@ -23,6 +23,9 @@ export const regenerateWiki = (id: number) =>
 export const continueProcessing = (id: number) =>
   request(`/books/${id}/continue`, { method: 'POST' })
 
+export const setStopChapter = (id: number, stopChapter: number | null) =>
+  request(`/books/${id}/stop-chapter`, { method: 'PATCH', body: JSON.stringify({ stop_chapter: stopChapter }) })
+
 export async function uploadBook(file: File): Promise<UploadResult> {
   const form = new FormData()
   form.append('file', file)
@@ -80,6 +83,7 @@ export interface Book {
   generation_step: string | null
   series_id: number | null
   series_order: number | null
+  stop_chapter: number | null
   created_at: string
 }
 

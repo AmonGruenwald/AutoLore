@@ -54,6 +54,7 @@ class Book(Base):
     series_order = Column(Integer, nullable=True)  # position within series
     generation_status = Column(String, default="pending")  # pending|processing|done|error
     generation_progress = Column(Integer, default=0)  # chapters processed
+    stop_chapter = Column(Integer, nullable=True)     # pause after this story-chapter index (1-based); None = no stop
     generation_step = Column(String, nullable=True)   # human-readable current step
     generation_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

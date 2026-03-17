@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight } from 'lucide-react'
-import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing } from '../lib/api'
+import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing, setStopChapter } from '../lib/api'
 import type { BookDetail, WikiPageList, WikiPageContent } from '../lib/api'
 import ChapterSlider from '../components/ChapterSlider'
 import WikiSidebar from '../components/WikiSidebar'
@@ -23,11 +23,13 @@ export default function BookWiki() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [autoProcess, setAutoProcess] = useState(false)
   const [continuing, setContinuing] = useState(false)
+  const [stopChapterInput, setStopChapterInput] = useState<string>('')
 
   // Load book info on mount
   useEffect(() => {
     getBook(id).then(b => {
       setBook(b)
+      setStopChapterInput(b.stop_chapter != null ? String(b.stop_chapter) : '')
       // Default to last available chapter
       const defaultChapter = b.generation_status === 'done'
         ? b.total_chapters
@@ -186,6 +188,22 @@ export default function BookWiki() {
             Chapter {book.generation_progress} of {book.total_chapters} done.
           </span>
           <div className="flex items-center gap-3 ml-auto">
+            <label className="flex items-center gap-1.5 text-xs text-amber-700 select-none whitespace-nowrap">
+              Stop at ch.
+              <input
+                type="number"
+                min={book.generation_progress + 1}
+                max={book.total_chapters}
+                value={stopChapterInput}
+                placeholder="—"
+                onChange={e => {
+                  setStopChapterInput(e.target.value)
+                  const val = e.target.value === '' ? null : Number(e.target.value)
+                  setStopChapter(id, val).then(() => getBook(id).then(setBook))
+                }}
+                className="w-14 px-1 py-0.5 text-xs border border-amber-300 rounded bg-parchment-50 text-center"
+              />
+            </label>
             <label className="flex items-center gap-1.5 text-xs text-amber-700 cursor-pointer select-none whitespace-nowrap">
               <input
                 type="checkbox"
