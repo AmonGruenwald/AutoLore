@@ -5,11 +5,7 @@
 @layer base {
   body {
     @apply bg-parchment-100 text-ink min-h-screen;
-    font-family: 'Georgia', 'Times New Roman', serif;
-  }
-
-  h1, h2, h3, h4 {
-    font-family: 'Georgia', serif;
+    font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
   }
 }
 
@@ -19,33 +15,41 @@
   }
 
   .wiki-link-missing {
-    @apply text-red-400 underline decoration-dotted cursor-not-allowed;
+    @apply text-ink-muted/60 line-through cursor-not-allowed;
   }
 
   .sidebar-item {
-    @apply px-3 py-1.5 rounded text-sm cursor-pointer hover:bg-parchment-200 transition-colors;
+    @apply block w-full px-3 py-1.5 text-sm text-left cursor-pointer rounded-md hover:bg-parchment-200 transition-colors truncate;
   }
 
   .sidebar-item-active {
-    @apply bg-parchment-300 font-semibold;
+    @apply bg-parchment-300 font-medium text-ink;
   }
 }
 
-/* Markdown content styles */
+/* Wiki article — switch back to a reading font */
+.wiki-content {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  @apply text-[15px] leading-7;
+}
+
 .wiki-content h2 {
-  @apply text-xl font-bold mt-6 mb-2 border-b border-parchment-300 pb-1;
+  @apply text-lg font-bold mt-7 mb-2 border-b border-parchment-300 pb-1;
+  font-family: 'Georgia', serif;
 }
 
 .wiki-content h3 {
-  @apply text-lg font-semibold mt-4 mb-1;
+  @apply text-base font-semibold mt-5 mb-1;
+  font-family: 'Georgia', serif;
 }
 
 .wiki-content p {
-  @apply mb-3 leading-relaxed;
+  @apply mb-4;
 }
 
-.wiki-content ul, .wiki-content ol {
-  @apply ml-5 mb-3;
+.wiki-content ul,
+.wiki-content ol {
+  @apply ml-5 mb-4;
 }
 
 .wiki-content li {

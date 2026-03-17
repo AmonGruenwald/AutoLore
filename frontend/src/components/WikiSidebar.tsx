@@ -11,18 +11,13 @@ interface Props {
 type Section = 'summaries' | 'characters' | 'places' | 'events'
 
 const SECTION_CONFIG: Record<Section, { label: string; icon: React.ReactNode }> = {
-  summaries: { label: 'Chapters', icon: <BookOpenCheck size={14} /> },
-  characters: { label: 'Characters', icon: <User size={14} /> },
-  places: { label: 'Places', icon: <MapPin size={14} /> },
-  events: { label: 'Events', icon: <Zap size={14} /> },
+  summaries:  { label: 'Chapters',    icon: <BookOpenCheck size={12} /> },
+  characters: { label: 'Characters',  icon: <User size={12} /> },
+  places:     { label: 'Places',      icon: <MapPin size={12} /> },
+  events:     { label: 'Events',      icon: <Zap size={12} /> },
 }
 
-function SidebarSection({
-  section,
-  items,
-  selectedSlug,
-  onSelect,
-}: {
+function SidebarSection({ section, items, selectedSlug, onSelect }: {
   section: Section
   items: WikiPageSummary[]
   selectedSlug: string | null
@@ -34,29 +29,28 @@ function SidebarSection({
   if (items.length === 0) return null
 
   return (
-    <div className="mb-2">
+    <div className="mb-1">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-1.5 w-full px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-ink-muted hover:text-ink transition-colors"
+        className="flex items-center gap-1.5 w-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-muted hover:text-ink transition-colors"
       >
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
         {icon}
-        {label} ({items.length})
+        {label}
+        <span className="ml-auto font-normal opacity-60">{items.length}</span>
       </button>
       {open && (
-        <ul>
+        <ul className="px-1.5 pb-1">
           {items.map(item => (
             <li key={item.slug}>
               <button
                 onClick={() => onSelect(item.slug, item.book_id)}
-                className={`sidebar-item w-full text-left truncate ${
-                  selectedSlug === item.slug ? 'sidebar-item-active' : ''
-                }`}
+                className={`sidebar-item ${selectedSlug === item.slug ? 'sidebar-item-active' : 'text-ink-muted'}`}
                 title={item.title}
               >
                 {item.title}
                 {item.book_title && (
-                  <span className="text-xs text-ink-muted ml-1">({item.book_title})</span>
+                  <span className="text-[10px] text-ink-muted/60 ml-1">({item.book_title})</span>
                 )}
               </button>
             </li>
@@ -73,14 +67,12 @@ export default function WikiSidebar({ pages, selectedSlug, onSelect }: Props) {
 
   if (total === 0) {
     return (
-      <div className="p-4 text-sm text-ink-muted italic">
-        No wiki pages available yet.
-      </div>
+      <p className="px-4 py-3 text-xs text-ink-muted italic">No pages yet.</p>
     )
   }
 
   return (
-    <nav className="overflow-y-auto">
+    <nav>
       {sections.map(section => (
         <SidebarSection
           key={section}
