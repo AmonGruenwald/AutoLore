@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Loader2, AlertCircle, Menu } from 'lucide-react'
-import { getBooks, getSeries, getSeriesWikiPages, getWikiPage } from '../lib/api'
+import { getBooks, getSeries, getSeriesWikiPages, getWikiPage, updateWikiPage } from '../lib/api'
 import type { WikiPageList, WikiPageContent, Series, Book } from '../lib/api'
 import WikiSidebar from '../components/WikiSidebar'
 import WikiPageComponent from '../components/WikiPage'
@@ -78,6 +78,21 @@ export default function SeriesWiki() {
   function handleSelect(slug: string, bookId?: number) {
     setSelectedSlug(slug)
     setSelectedBookId(bookId ?? null)
+  }
+
+  async function handleEditPage(title: string, content: string) {
+    if (!currentPage || !selectedBookId) return
+    const seriesData = seriesList.find(s => s.id === id)
+    if (!seriesData) return
+    let offset = 0
+    for (const bid of seriesData.book_order) {
+      if (bid === selectedBookId) break
+      offset += books.find(b => b.id === bid)?.total_chapters ?? 0
+    }
+    const localChapter = Math.max(1, globalChapter - offset)
+    const updated = await updateWikiPage(selectedBookId, currentPage.slug, title, content, localChapter)
+    setCurrentPage(updated)
+    getSeriesWikiPages(id, globalChapter).then(setPages)
   }
 
   function handleNavigate(slug: string) {
@@ -164,7 +179,7 @@ export default function SeriesWiki() {
               sameTypePages={[]}
               onDelete={() => {}}
               onMerge={() => {}}
-              onEdit={async () => {}}
+              onEdit={handleEditPage}
               merging={false}
             />
           ) : (
