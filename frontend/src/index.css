@@ -11,7 +11,7 @@
 
 @layer components {
   .wiki-link {
-    @apply text-amber-700 underline decoration-dotted hover:text-amber-900 hover:decoration-solid cursor-pointer;
+    @apply inline text-amber-700 underline decoration-dotted hover:text-amber-900 hover:decoration-solid cursor-pointer;
   }
 
   .wiki-link-missing {
