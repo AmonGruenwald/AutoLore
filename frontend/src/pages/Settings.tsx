@@ -7,6 +7,8 @@ export default function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
+  const [customModel, setCustomModel] = useState('')
+  const [useCustom, setUseCustom] = useState(false)
   const [showKey, setShowKey] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -15,7 +17,13 @@ export default function Settings() {
   useEffect(() => {
     getSettings().then(s => {
       setSettings(s)
-      setModel(s.openrouter_model)
+      const isKnown = s.available_models.some(m => m.id === s.openrouter_model)
+      if (isKnown) {
+        setModel(s.openrouter_model)
+      } else {
+        setUseCustom(true)
+        setCustomModel(s.openrouter_model)
+      }
     })
   }, [])
 
@@ -23,7 +31,9 @@ export default function Settings() {
     setSaving(true)
     setError('')
     try {
-      const update: Record<string, string> = { openrouter_model: model }
+      const activeModel = useCustom ? customModel.trim() : model
+      if (!activeModel) { setError('Model is required'); setSaving(false); return }
+      const update: Record<string, string> = { openrouter_model: activeModel }
       if (apiKey.trim()) update.openrouter_api_key = apiKey.trim()
       await updateSettings(update)
       setSaved(true)
@@ -77,18 +87,37 @@ export default function Settings() {
 
         {/* Model selection */}
         <div>
-          <label className="block text-sm font-semibold mb-1">Model</label>
-          <select
-            value={model}
-            onChange={e => setModel(e.target.value)}
-            className="w-full border border-parchment-300 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
-          >
-            {settings.available_models.map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-sm font-semibold">Model</label>
+            <button
+              type="button"
+              onClick={() => setUseCustom(v => !v)}
+              className="text-xs text-amber-700 hover:text-amber-900 underline"
+            >
+              {useCustom ? 'Pick from list' : 'Enter custom model ID'}
+            </button>
+          </div>
+          {useCustom ? (
+            <input
+              type="text"
+              value={customModel}
+              onChange={e => setCustomModel(e.target.value)}
+              placeholder="e.g. meta-llama/llama-3.1-70b-instruct"
+              className="w-full border border-parchment-300 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400 font-mono"
+            />
+          ) : (
+            <select
+              value={model}
+              onChange={e => setModel(e.target.value)}
+              className="w-full border border-parchment-300 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+            >
+              {settings.available_models.map(m => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          )}
           <p className="text-xs text-ink-muted mt-1">
-            Used for wiki generation and duplicate detection. Higher quality models give better results.
+            Any model available on OpenRouter can be used. Higher quality models give better results.
           </p>
         </div>
 
