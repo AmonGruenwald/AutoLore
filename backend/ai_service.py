@@ -283,8 +283,12 @@ New information from Chapter {chapter_number} summary:
 
 Instructions:
 - Extract ONLY facts about "{entity_name}" from the chapter summary above.
-- Incorporate new information into the existing page.
-- Keep all existing accurate information; do not remove it.
+- The page must reflect "{entity_name}"'s CURRENT state as shown in Chapter {chapter_number}.
+- For time-sensitive attributes (age, appearance, physical condition, social status, role,
+  relationships, location, allegiances): if the new chapter shows a change, REPLACE the old
+  value — do not keep both. The page should read as a current description, not a history log.
+- For permanent facts (origin, backstory, fixed traits): retain them unless contradicted.
+- Add any genuinely new information not already covered.
 - Use [[Character:Name]], [[Place:Name]], [[Event:Name]] syntax for cross-references.
 - Use markdown formatting (## headings, bullet lists where appropriate).
 - Do not include a top-level title.
