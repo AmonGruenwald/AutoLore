@@ -141,6 +141,7 @@ export default function SeriesWiki() {
               pages={pages}
               selectedSlug={selectedSlug}
               onSelect={(slug, bookId) => { handleSelect(slug, bookId); setSidebarOpen(false) }}
+              onHome={() => { setSelectedSlug(null); setCurrentPage(null); setSidebarOpen(false) }}
             />
           ) : (
             <div className="p-4 text-center"><Loader2 size={16} className="animate-spin mx-auto" /></div>
@@ -160,6 +161,11 @@ export default function SeriesWiki() {
                 ...pages.places.map(p => p.slug),
                 ...pages.events.map(p => p.slug),
               ]) : undefined}
+              sameTypePages={[]}
+              onDelete={() => {}}
+              onMerge={() => {}}
+              onEdit={async () => {}}
+              merging={false}
             />
           ) : (
             <div className="text-center text-ink-muted pt-16">
