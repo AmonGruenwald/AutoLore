@@ -168,7 +168,32 @@ async def regenerate_wiki(
     if not api_key:
         raise HTTPException(400, "OpenRouter API key not configured")
 
+    # Delete all generated wiki content
     db.query(WikiPage).filter_by(book_id=book_id).delete()
+
+    # Restore chapter data to original state from the stored EPUB.
+    # confirmChapterSelection permanently mutates raw_text (merges) and title
+    # ("Ch1 / Ch2"), so we must re-parse to undo those changes.
+    epub_path = os.path.join(EPUB_STORAGE, f"{book.content_hash}.epub")
+    if os.path.exists(epub_path):
+        with open(epub_path, "rb") as f:
+            file_bytes = f.read()
+        try:
+            parsed = parse_epub(file_bytes)
+            orig_by_number = {ch.number: ch for ch in parsed.chapters}
+            for ch in db.query(Chapter).filter_by(book_id=book_id).all():
+                orig = orig_by_number.get(ch.number)
+                if orig:
+                    ch.title = orig.title
+                    ch.raw_text = orig.raw_text
+            book.total_chapters = len(parsed.chapters)
+        except Exception:
+            pass  # If re-parse fails, fall back to just resetting metadata
+    else:
+        # EPUB no longer on disk — reset to actual chapter count from DB
+        book.total_chapters = db.query(Chapter).filter_by(book_id=book_id).count()
+
+    # Reset all selection/generation metadata
     db.query(Chapter).filter_by(book_id=book_id).update({
         "is_story_chapter": None,
         "clean_title": None,
