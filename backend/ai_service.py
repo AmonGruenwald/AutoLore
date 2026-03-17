@@ -81,6 +81,51 @@ Judge by the opening text above, not the title. Answer with one word: true or fa
             return True
 
 
+async def _generate_single_preview(
+    api_key: str,
+    model: str,
+    chapter: dict,
+    semaphore: asyncio.Semaphore,
+) -> str:
+    """Generate a one-sentence summary for a chapter to help the user decide whether to include it."""
+    prompt = f"""Write ONE sentence (max 25 words) describing what happens or what this section is about.
+Be factual and specific to the content, not generic.
+
+Title: {chapter['title']}
+Opening text:
+{chapter['preview']}
+
+Reply with only the single sentence, no quotes."""
+
+    async with semaphore:
+        try:
+            raw = await _call_openrouter(
+                api_key, model,
+                [{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=60,
+            )
+            return raw.strip()
+        except Exception:
+            return ""
+
+
+async def generate_chapter_previews(
+    api_key: str,
+    model: str,
+    chapters: list[dict],
+) -> list[str]:
+    """
+    Generate a one-sentence summary for each chapter in parallel.
+    Returns a list of strings in the same order as the input.
+    """
+    semaphore = asyncio.Semaphore(8)
+    results = await asyncio.gather(
+        *[_generate_single_preview(api_key, model, c, semaphore) for c in chapters]
+    )
+    return list(results)
+
+
 async def classify_story_chapters(
     api_key: str,
     model: str,

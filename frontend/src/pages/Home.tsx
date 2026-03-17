@@ -30,9 +30,9 @@ export default function Home() {
     load()
   }, [load])
 
-  // Poll while any book is processing or pending (pending may transition to processing)
+  // Poll while any book is processing, pending, or generating previews
   useEffect(() => {
-    const isProcessing = books.some(b => b.generation_status === 'processing' || b.generation_status === 'pending' || b.generation_status === 'waiting')
+    const isProcessing = books.some(b => ['processing', 'pending', 'waiting', 'selecting'].includes(b.generation_status))
     if (isProcessing && !pollingRef.current) {
       pollingRef.current = setInterval(load, 3000)
     } else if (!isProcessing && pollingRef.current) {
@@ -195,7 +195,7 @@ export default function Home() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {seriesBooks.map((book, i) => (
                 <BookCard key={book.id} book={book} seriesOrder={i + 1}
-                  onOpen={() => navigate(`/book/${book.id}`)}
+                  onOpen={() => navigate(book.generation_status === 'selecting' ? `/book/${book.id}/select` : `/book/${book.id}`)}
                   onDelete={() => handleDelete(book.id)}
                   onRegenerate={() => handleRegenerate(book.id)}
                 />
@@ -212,7 +212,7 @@ export default function Home() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {standaloneBooks.map(book => (
               <BookCard key={book.id} book={book}
-                onOpen={() => navigate(`/book/${book.id}`)}
+                onOpen={() => navigate(book.generation_status === 'selecting' ? `/book/${book.id}/select` : `/book/${book.id}`)}
                 onDelete={() => handleDelete(book.id)}
                 onRegenerate={() => handleRegenerate(book.id)}
               />
@@ -262,13 +262,22 @@ function BookCard({
       <p className="text-xs text-ink-muted mb-3">{book.total_chapters} chapters</p>
       <GenerationStatus book={book} />
       <div className="flex gap-1.5 mt-3">
-        <button
-          onClick={onOpen}
-          disabled={book.generation_status !== 'done' && book.generation_status !== 'processing' && book.generation_status !== 'waiting'}
-          className="flex-1 text-xs py-1.5 rounded bg-ink text-parchment-100 hover:bg-ink-light disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          Open Wiki
-        </button>
+        {book.generation_status === 'selecting' ? (
+          <button
+            onClick={onOpen}
+            className="flex-1 text-xs py-1.5 rounded bg-amber-600 text-white hover:bg-amber-700"
+          >
+            Select Chapters →
+          </button>
+        ) : (
+          <button
+            onClick={onOpen}
+            disabled={book.generation_status !== 'done' && book.generation_status !== 'processing' && book.generation_status !== 'waiting'}
+            className="flex-1 text-xs py-1.5 rounded bg-ink text-parchment-100 hover:bg-ink-light disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Open Wiki
+          </button>
+        )}
         <button
           onClick={onRegenerate}
           title="Regenerate wiki"

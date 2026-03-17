@@ -11,7 +11,7 @@ import asyncio
 import re
 from sqlalchemy.orm import Session
 from database import Book, Chapter, WikiPage, WikiPageVersion, Setting
-from ai_service import classify_story_chapters, generate_chapter_summary, generate_entity_page, resolve_entity_aliases, _slugify
+from ai_service import generate_chapter_previews, generate_chapter_summary, generate_entity_page, resolve_entity_aliases, _slugify
 
 
 async def _get_settings(db: Session) -> tuple[str, str]:
@@ -150,6 +150,48 @@ def _get_entity_info(db: Session, book_id: int) -> dict[str, dict]:
     }
 
 
+async def generate_previews_for_book(book_id: int, db_factory) -> None:
+    """
+    Generate one-sentence summaries for all chapters so the user can decide
+    which to include.  Runs as a background task after EPUB import.
+    On completion the book remains in "selecting" status.
+    """
+    db: Session = db_factory()
+    try:
+        book = db.query(Book).filter_by(id=book_id).first()
+        if not book:
+            return
+
+        try:
+            api_key, model = await _get_settings(db)
+        except ValueError:
+            # No API key — leave status as "selecting" with empty summaries
+            return
+
+        book.generation_step = "Generating chapter previews…"
+        db.commit()
+
+        all_chapters = (
+            db.query(Chapter)
+            .filter_by(book_id=book_id)
+            .order_by(Chapter.number)
+            .all()
+        )
+
+        to_preview = [
+            {"number": c.number, "title": c.title, "preview": c.raw_text[:600].strip()}
+            for c in all_chapters
+        ]
+        summaries = await generate_chapter_previews(api_key, model, to_preview)
+        for chapter_obj, summary in zip(all_chapters, summaries):
+            chapter_obj.one_sentence_summary = summary
+
+        book.generation_step = None
+        db.commit()
+    finally:
+        db.close()
+
+
 async def build_wiki_for_book(book_id: int, db_factory) -> None:
     """
     Process the next unprocessed chapter for book_id.
@@ -157,8 +199,8 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
     Sets generation_status to "waiting" after each chapter so the user
     can review before continuing, or "done" when all chapters are complete.
 
-    Invoke once on import; invoke again (via /continue) for each subsequent
-    chapter, or let the frontend loop automatically with auto-process on.
+    Invoke once the user has confirmed their chapter selection via
+    POST /api/books/{book_id}/confirm-selection.
 
     db_factory: callable that returns a new SQLAlchemy Session.
     """
@@ -181,25 +223,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             .all()
         )
 
-        # On the very first call, classify which chapters are part of the story.
-        if book.generation_progress == 0 and any(c.is_story_chapter is None for c in all_chapters):
-            book.generation_step = "Identifying story chapters…"
-            db.commit()
-
-            to_classify = [
-                {
-                    "number": c.number,
-                    "title": c.title,
-                    "preview": c.raw_text[:400].strip(),
-                }
-                for c in all_chapters
-            ]
-            flags = await classify_story_chapters(api_key, model, to_classify)
-            for chapter_obj, is_story in zip(all_chapters, flags):
-                chapter_obj.is_story_chapter = is_story
-            db.commit()
-
-        # Work only with story chapters, in order
+        # Work only with story chapters selected by the user
         story_chapters = [c for c in all_chapters if c.is_story_chapter]
         total = len(story_chapters)
 

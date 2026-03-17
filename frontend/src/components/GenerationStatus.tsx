@@ -1,4 +1,4 @@
-import { Loader2, CheckCircle, AlertCircle, Clock, PauseCircle } from 'lucide-react'
+import { Loader2, CheckCircle, AlertCircle, Clock, PauseCircle, ListChecks } from 'lucide-react'
 import type { Book } from '../lib/api'
 
 interface Props {
@@ -7,6 +7,17 @@ interface Props {
 
 export default function GenerationStatus({ book }: Props) {
   const { generation_status: status, generation_progress: progress, total_chapters } = book
+
+  if (status === 'selecting') {
+    const hasStep = !!book.generation_step
+    return (
+      <span className="flex items-center gap-1 text-amber-700 text-xs">
+        {hasStep
+          ? <><Loader2 size={12} className="animate-spin" /> Generating previews…</>
+          : <><ListChecks size={12} /> Chapter selection needed</>}
+      </span>
+    )
+  }
 
   if (status === 'done') {
     return (

@@ -23,6 +23,19 @@ export const regenerateWiki = (id: number) =>
 export const continueProcessing = (id: number) =>
   request(`/books/${id}/continue`, { method: 'POST' })
 
+export const getChapters = (id: number) =>
+  request<ChapterList>(`/books/${id}/chapters`)
+
+export const confirmChapterSelection = (
+  id: number,
+  selections: { id: number; include: boolean }[],
+  merges: number[][],
+) =>
+  request(`/books/${id}/confirm-selection`, {
+    method: 'POST',
+    body: JSON.stringify({ selections, merges }),
+  })
+
 export const setStopChapter = (id: number, stopChapter: number | null) =>
   request(`/books/${id}/stop-chapter`, { method: 'PATCH', body: JSON.stringify({ stop_chapter: stopChapter }) })
 
@@ -73,12 +86,26 @@ export const updateSettings = (data: Partial<{ openrouter_api_key: string; openr
   request('/settings/', { method: 'PUT', body: JSON.stringify(data) })
 
 // Types
+export interface ChapterPreview {
+  id: number
+  number: number
+  title: string
+  one_sentence_summary: string | null
+}
+
+export interface ChapterList {
+  book_id: number
+  title: string
+  generation_step: string | null
+  chapters: ChapterPreview[]
+}
+
 export interface Book {
   id: number
   title: string
   author: string
   total_chapters: number
-  generation_status: 'pending' | 'processing' | 'waiting' | 'done' | 'error'
+  generation_status: 'selecting' | 'pending' | 'processing' | 'waiting' | 'done' | 'error'
   generation_progress: number
   generation_step: string | null
   series_id: number | null

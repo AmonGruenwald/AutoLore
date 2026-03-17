@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from database import Book, Chapter, Series, Setting, WikiPage, get_db, SessionLocal
 from epub_parser import parse_epub
 from duplicate_detector import compute_hash, find_duplicate
-from wiki_builder import build_wiki_for_book
+from wiki_builder import build_wiki_for_book, generate_previews_for_book
 
 router = APIRouter(prefix="/api/books", tags=["books"])
 
@@ -45,7 +45,7 @@ def _import_book(db: Session, file_bytes: bytes, filename: str) -> Book:
         filename=filename,
         content_hash=content_hash,
         total_chapters=len(parsed.chapters),
-        generation_status="pending",
+        generation_status="selecting",
     )
     db.add(book)
     db.flush()
@@ -127,7 +127,7 @@ async def upload_book(
     book = _import_book(db, file_bytes, file.filename)
 
     if api_key:
-        background_tasks.add_task(_run_generation, book.id)
+        background_tasks.add_task(_run_previews, book.id)
 
     return {"status": "imported", "book_id": book.id, "title": book.title}
 
@@ -149,7 +149,7 @@ async def confirm_duplicate_upload(
 
     api_key, _ = _get_api_settings(db)
     if api_key:
-        background_tasks.add_task(_run_generation, book.id)
+        background_tasks.add_task(_run_previews, book.id)
 
     return {"status": "imported", "book_id": book.id, "title": book.title}
 
@@ -169,13 +169,19 @@ async def regenerate_wiki(
         raise HTTPException(400, "OpenRouter API key not configured")
 
     db.query(WikiPage).filter_by(book_id=book_id).delete()
-    db.query(Chapter).filter_by(book_id=book_id).update({"is_story_chapter": None})
-    book.generation_status = "pending"
+    db.query(Chapter).filter_by(book_id=book_id).update({
+        "is_story_chapter": None,
+        "clean_title": None,
+        "one_sentence_summary": None,
+    })
+    book.generation_status = "selecting"
     book.generation_progress = 0
     book.generation_error = None
+    book.generation_step = None
     db.commit()
 
-    background_tasks.add_task(_run_generation, book_id)
+    if api_key:
+        background_tasks.add_task(_run_previews, book_id)
     return {"ok": True}
 
 
@@ -198,6 +204,102 @@ def set_stop_chapter(
     return {"ok": True}
 
 
+@router.get("/{book_id}/chapters")
+def list_chapters(book_id: int, db: Session = Depends(get_db)):
+    """Return all chapters (with one-sentence summaries) for the chapter selection UI."""
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+    chapters = (
+        db.query(Chapter)
+        .filter_by(book_id=book_id)
+        .order_by(Chapter.number)
+        .all()
+    )
+    return {
+        "book_id": book_id,
+        "title": book.title,
+        "generation_step": book.generation_step,
+        "chapters": [
+            {
+                "id": c.id,
+                "number": c.number,
+                "title": c.title,
+                "one_sentence_summary": c.one_sentence_summary,
+            }
+            for c in chapters
+        ],
+    }
+
+
+class ChapterSelectionItem(BaseModel):
+    id: int
+    include: bool
+
+
+class ConfirmSelectionBody(BaseModel):
+    selections: list[ChapterSelectionItem]
+    merges: list[list[int]] = []  # each sub-list is a pair [id_a, id_b] to merge
+
+
+@router.post("/{book_id}/confirm-selection")
+async def confirm_selection(
+    book_id: int,
+    body: ConfirmSelectionBody,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Save the user's chapter selection (and optional merges), then start wiki generation.
+    Merges: for each pair [a, b], chapter b's text is appended to chapter a's raw_text
+    and chapter b is excluded.
+    """
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+    if book.generation_status != "selecting":
+        raise HTTPException(400, f"Book is not in selection state (status: {book.generation_status})")
+
+    api_key, _ = _get_api_settings(db)
+    if not api_key:
+        raise HTTPException(400, "OpenRouter API key not configured")
+
+    # Apply merges first: append second chapter's text to first, then exclude second
+    merged_out: set[int] = set()
+    for pair in body.merges:
+        if len(pair) != 2:
+            continue
+        id_a, id_b = pair
+        ch_a = db.query(Chapter).filter_by(id=id_a, book_id=book_id).first()
+        ch_b = db.query(Chapter).filter_by(id=id_b, book_id=book_id).first()
+        if ch_a and ch_b:
+            ch_a.raw_text = ch_a.raw_text.rstrip() + "\n\n" + ch_b.raw_text.lstrip()
+            ch_a.title = f"{ch_a.title} / {ch_b.title}"
+            merged_out.add(id_b)
+
+    # Apply include/exclude flags
+    include_ids = {s.id for s in body.selections if s.include} - merged_out
+    for sel in body.selections:
+        ch = db.query(Chapter).filter_by(id=sel.id, book_id=book_id).first()
+        if ch:
+            ch.is_story_chapter = (sel.id in include_ids)
+
+    # Force-exclude merged-out chapters
+    for ch_id in merged_out:
+        ch = db.query(Chapter).filter_by(id=ch_id, book_id=book_id).first()
+        if ch:
+            ch.is_story_chapter = False
+
+    story_count = sum(1 for s in body.selections if s.id in include_ids)
+    book.total_chapters = story_count
+    book.generation_status = "pending"
+    book.generation_step = None
+    db.commit()
+
+    background_tasks.add_task(_run_generation, book_id)
+    return {"ok": True}
+
+
 @router.post("/{book_id}/continue")
 async def continue_processing(
     book_id: int,
@@ -208,7 +310,7 @@ async def continue_processing(
     book = db.query(Book).filter_by(id=book_id).first()
     if not book:
         raise HTTPException(404, "Book not found")
-    if book.generation_status not in ("waiting", "pending"):
+    if book.generation_status not in ("waiting", "pending", "error"):
         raise HTTPException(400, f"Book is not waiting for continuation (status: {book.generation_status})")
 
     api_key, _ = _get_api_settings(db)
@@ -217,6 +319,10 @@ async def continue_processing(
 
     background_tasks.add_task(_run_generation, book_id)
     return {"ok": True}
+
+
+async def _run_previews(book_id: int):
+    await generate_previews_for_book(book_id, _db_factory)
 
 
 async def _run_generation(book_id: int):
@@ -306,7 +412,7 @@ def _book_detail(book: Book) -> dict:
     d = _book_summary(book)
     d["generation_error"] = book.generation_error
     story_chapters = sorted(
-        [c for c in book.chapters if c.is_story_chapter is not False],
+        [c for c in book.chapters if c.is_story_chapter is True],
         key=lambda c: c.number,
     )
     d["chapters"] = [

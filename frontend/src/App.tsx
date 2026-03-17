@@ -3,6 +3,7 @@ import Home from './pages/Home'
 import BookWiki from './pages/BookWiki'
 import SeriesWiki from './pages/SeriesWiki'
 import Settings from './pages/Settings'
+import ChapterSelection from './pages/ChapterSelection'
 import Navbar from './components/Navbar'
 
 export default function App() {
@@ -12,6 +13,7 @@ export default function App() {
       <main className="flex-1">
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/book/:bookId/select" element={<ChapterSelection />} />
           <Route path="/book/:bookId" element={<BookWiki />} />
           <Route path="/series/:seriesId" element={<SeriesWiki />} />
           <Route path="/settings" element={<Settings />} />

@@ -72,8 +72,9 @@ class Chapter(Base):
     number = Column(Integer, nullable=False)  # 1-indexed, original epub order
     title = Column(String, default="")
     raw_text = Column(Text, nullable=False)
-    is_story_chapter = Column(Boolean, nullable=True)  # None = unclassified
+    is_story_chapter = Column(Boolean, nullable=True)  # None = unclassified / pending selection
     clean_title = Column(String, nullable=True)        # AI-generated descriptive title
+    one_sentence_summary = Column(Text, nullable=True) # Short preview for chapter selection UI
 
     book = relationship("Book", back_populates="chapters")
 
@@ -123,6 +124,7 @@ def _run_migrations():
         "ALTER TABLE chapters ADD COLUMN is_story_chapter INTEGER",
         "ALTER TABLE chapters ADD COLUMN clean_title TEXT",
         "ALTER TABLE books ADD COLUMN stop_chapter INTEGER",
+        "ALTER TABLE chapters ADD COLUMN one_sentence_summary TEXT",
     ]
     with engine.connect() as conn:
         for sql in migrations:
