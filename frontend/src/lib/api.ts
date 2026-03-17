@@ -69,6 +69,21 @@ export const getWikiPages = (bookId: number, upToChapter: number) =>
 export const getWikiPage = (bookId: number, slug: string, upToChapter: number) =>
   request<WikiPageContent>(`/wiki/${bookId}/page/${slug}?up_to_chapter=${upToChapter}`)
 
+export const deleteWikiPage = (bookId: number, slug: string) =>
+  request(`/wiki/${bookId}/page/${slug}`, { method: 'DELETE' })
+
+export const mergeWikiPages = (bookId: number, slug: string, mergeWithSlug: string) =>
+  request<WikiPageContent>(`/wiki/${bookId}/page/${slug}/merge`, {
+    method: 'POST',
+    body: JSON.stringify({ merge_with_slug: mergeWithSlug }),
+  })
+
+export const updateWikiPage = (bookId: number, slug: string, title: string, content: string, editChapter: number) =>
+  request<WikiPageContent>(`/wiki/${bookId}/page/${slug}`, {
+    method: 'PUT',
+    body: JSON.stringify({ title, content, edit_chapter: editChapter }),
+  })
+
 export const getSeriesWikiPages = (seriesId: number, upToChapter: number) =>
   request<WikiPageList>(`/wiki/series/${seriesId}/pages?up_to_global_chapter=${upToChapter}`)
 

@@ -378,6 +378,111 @@ canonical known name (string) or null if it is new:
     return {}
 
 
+async def merge_wiki_pages(
+    api_key: str,
+    model: str,
+    title_a: str,
+    page_type: str,
+    content_a: str,
+    title_b: str,
+    content_b: str,
+) -> dict:
+    """
+    Merge two wiki pages of the same type into one.
+    Returns {"title": ..., "content": ...}.
+    """
+    prompt = f"""Merge these two wiki pages about the same {page_type} into a single comprehensive page.
+
+Page 1: "{title_a}"
+{content_a}
+
+---
+
+Page 2: "{title_b}"
+{content_b}
+
+---
+
+Instructions:
+- These pages describe the same {page_type}, possibly under different names or from different angles.
+- Combine all unique information; remove duplicate sentences.
+- Preserve all [[Character:Name]], [[Place:Name]], [[Event:Name]] wiki-link syntax.
+- Use markdown formatting (## headings, bullet lists where appropriate).
+- Do NOT include a top-level title in the content — that goes in <title> only.
+- Pick the most complete, recognisable name for the merged page.
+
+Output exactly:
+<title>[best name for this {page_type}]</title>
+<content>
+[merged wiki page content]
+</content>"""
+
+    messages = [
+        {"role": "system", "content": GROUNDING_SYSTEM},
+        {"role": "user", "content": prompt},
+    ]
+    raw = await _call_openrouter(api_key, model, messages, max_tokens=1400)
+
+    title_match   = re.search(r"<title>(.*?)</title>", raw, re.DOTALL)
+    content_match = re.search(r"<content>(.*?)</content>", raw, re.DOTALL)
+
+    return {
+        "title":   title_match.group(1).strip()   if title_match   else title_a,
+        "content": content_match.group(1).strip() if content_match else f"{content_a}\n\n---\n\n{content_b}",
+    }
+
+
+async def propagate_wiki_edit(
+    api_key: str,
+    model: str,
+    page_type: str,
+    old_content: str,
+    new_content: str,
+    future_content: str,
+) -> dict:
+    """
+    A user manually edited a wiki page.  Apply those edits to a later auto-generated
+    version of the same page that was already created for a future chapter.
+
+    Returns {"content": ...}.
+    """
+    prompt = f"""A user manually edited a wiki page ({page_type}).
+Apply the user's changes to the later version of the same page, while preserving
+any additional information that only exists in the later version.
+
+--- ORIGINAL (before user edit) ---
+{old_content}
+
+--- USER'S EDITED VERSION ---
+{new_content}
+
+--- LATER AUTO-GENERATED VERSION (from a future chapter) ---
+{future_content}
+
+Instructions:
+- Identify what the user added, removed, or changed between the ORIGINAL and USER'S EDITED VERSION.
+- Apply those same changes to the LATER VERSION.
+- Keep all information in the LATER VERSION that is not contradicted by the user's edit.
+- Preserve all [[Character:Name]], [[Place:Name]], [[Event:Name]] wiki-link syntax.
+- Do NOT include a top-level title.
+- Output only the updated content, no commentary.
+
+<content>
+[updated later version]
+</content>"""
+
+    messages = [
+        {"role": "system", "content": GROUNDING_SYSTEM},
+        {"role": "user", "content": prompt},
+    ]
+    raw = await _call_openrouter(api_key, model, messages, max_tokens=1000)
+
+    content_match = re.search(r"<content>(.*?)</content>", raw, re.DOTALL)
+    return {
+        "content": content_match.group(1).strip() if content_match else future_content,
+    }
+
+
 async def check_duplicate_book(
     api_key: str,
     model: str,

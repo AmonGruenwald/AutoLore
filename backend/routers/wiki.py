@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from database import Book, WikiPage, WikiPageVersion, Series, get_db
+from database import Book, WikiPage, WikiPageVersion, Series, Setting, get_db
 
 router = APIRouter(prefix="/api/wiki", tags=["wiki"])
 
@@ -90,6 +91,200 @@ def get_wiki_page(book_id: int, slug: str, up_to_chapter: int, db: Session = Dep
             {"chapter": v.first_visible_chapter} for v in visible_versions
         ],
     }
+
+
+@router.delete("/{book_id}/page/{slug}")
+def delete_wiki_page(book_id: int, slug: str, db: Session = Depends(get_db)):
+    """Permanently delete a wiki page and all its versions."""
+    page = db.query(WikiPage).filter_by(book_id=book_id, slug=slug).first()
+    if not page:
+        raise HTTPException(404, "Wiki page not found")
+    db.delete(page)
+    db.commit()
+    return {"ok": True}
+
+
+class MergePageBody(BaseModel):
+    merge_with_slug: str
+
+
+@router.post("/{book_id}/page/{slug}/merge")
+async def merge_wiki_page(
+    book_id: int,
+    slug: str,
+    body: MergePageBody,
+    db: Session = Depends(get_db),
+):
+    """
+    Merge two wiki pages into one using AI.
+    The source page (slug) is updated with the combined content; the
+    target page (merge_with_slug) is deleted.  Returns the updated page.
+    """
+    from ai_service import merge_wiki_pages as ai_merge
+    from wiki_builder import resolve_links
+
+    if slug == body.merge_with_slug:
+        raise HTTPException(400, "Cannot merge a page with itself")
+
+    page_a = db.query(WikiPage).filter_by(book_id=book_id, slug=slug).first()
+    page_b = db.query(WikiPage).filter_by(book_id=book_id, slug=body.merge_with_slug).first()
+    if not page_a or not page_b:
+        raise HTTPException(404, "Page not found")
+    if page_a.page_type != page_b.page_type:
+        raise HTTPException(400, "Can only merge pages of the same type")
+
+    api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
+    model_row   = db.query(Setting).filter_by(key="openrouter_model").first()
+    api_key = api_key_row.value if api_key_row else ""
+    model   = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+    if not api_key:
+        raise HTTPException(400, "OpenRouter API key not configured")
+
+    content_a = _latest_content(page_a)
+    content_b = _latest_content(page_b)
+
+    fvc = min(
+        (min(v.first_visible_chapter for v in page_a.versions) if page_a.versions else 1),
+        (min(v.first_visible_chapter for v in page_b.versions) if page_b.versions else 1),
+    )
+    lvc = max(
+        (max(v.first_visible_chapter for v in page_a.versions) if page_a.versions else 1),
+        (max(v.first_visible_chapter for v in page_b.versions) if page_b.versions else 1),
+    )
+
+    merged = await ai_merge(
+        api_key, model,
+        page_a.title, page_a.page_type, content_a,
+        page_b.title, content_b,
+    )
+
+    # Replace all versions of page_a with a single merged version
+    for v in list(page_a.versions):
+        db.delete(v)
+    db.flush()
+
+    links = resolve_links(merged["content"])
+    db.add(WikiPageVersion(
+        page_id=page_a.id,
+        first_visible_chapter=fvc,
+        content_markdown=merged["content"],
+        outgoing_links=links,
+    ))
+    page_a.title = merged["title"]
+
+    # Delete the absorbed page
+    db.delete(page_b)
+    db.commit()
+
+    # Return full page detail so the frontend can display it immediately
+    db.refresh(page_a)
+    return {
+        "slug": page_a.slug,
+        "title": page_a.title,
+        "page_type": page_a.page_type,
+        "content_markdown": merged["content"],
+        "first_visible_chapter": fvc,
+        "last_updated_chapter": lvc,
+        "outgoing_links": links,
+        "backlinks": [],
+        "version_history": [{"chapter": fvc}],
+    }
+
+
+class UpdatePageBody(BaseModel):
+    title: str
+    content: str
+    edit_chapter: int  # the chapter the user is viewing (determines which version is being edited)
+
+
+@router.put("/{book_id}/page/{slug}")
+async def update_wiki_page(
+    book_id: int,
+    slug: str,
+    body: UpdatePageBody,
+    db: Session = Depends(get_db),
+):
+    """
+    Manually edit a wiki page's title and content.
+    The version visible at edit_chapter is updated and later versions are
+    AI-propagated to incorporate the user's changes.
+    """
+    from ai_service import propagate_wiki_edit
+    from wiki_builder import resolve_links
+
+    page = db.query(WikiPage).filter_by(book_id=book_id, slug=slug).first()
+    if not page:
+        raise HTTPException(404, "Wiki page not found")
+
+    # Versions visible at edit_chapter, sorted by chapter
+    visible = sorted(
+        [v for v in page.versions if v.first_visible_chapter <= body.edit_chapter],
+        key=lambda v: v.first_visible_chapter,
+    )
+    if not visible:
+        raise HTTPException(404, "No version visible at this chapter")
+
+    target = visible[-1]
+    old_content = target.content_markdown
+
+    # Apply user's edit to the target version
+    target.content_markdown = body.content
+    target.outgoing_links = resolve_links(body.content)
+    page.title = body.title
+
+    # Future versions — propagate the user's changes using AI
+    future_versions = sorted(
+        [v for v in page.versions if v.first_visible_chapter > target.first_visible_chapter],
+        key=lambda v: v.first_visible_chapter,
+    )
+
+    if future_versions:
+        api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
+        model_row   = db.query(Setting).filter_by(key="openrouter_model").first()
+        api_key = api_key_row.value if api_key_row else ""
+        model   = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+
+        if api_key:
+            current_old = old_content
+            current_new = body.content
+            for fv in future_versions:
+                result = await propagate_wiki_edit(
+                    api_key, model,
+                    page.page_type,
+                    current_old, current_new,
+                    fv.content_markdown,
+                )
+                fv.content_markdown = result["content"]
+                fv.outgoing_links = resolve_links(result["content"])
+                # Cascade: next iteration uses this updated version as the base
+                current_old = fv.content_markdown
+                current_new = result["content"]
+
+    db.commit()
+    db.refresh(page)
+
+    all_versions = sorted(page.versions, key=lambda v: v.first_visible_chapter)
+    latest = all_versions[-1]
+    fvc = all_versions[0].first_visible_chapter
+
+    return {
+        "id": page.id,
+        "slug": page.slug,
+        "title": page.title,
+        "page_type": page.page_type,
+        "content_markdown": latest.content_markdown,
+        "first_visible_chapter": fvc,
+        "last_updated_chapter": latest.first_visible_chapter,
+        "outgoing_links": latest.outgoing_links or [],
+        "backlinks": _find_backlinks(db, book_id, slug, body.edit_chapter),
+        "version_history": [{"chapter": v.first_visible_chapter} for v in all_versions],
+    }
+
+
+def _latest_content(page: WikiPage) -> str:
+    if not page.versions:
+        return ""
+    return max(page.versions, key=lambda v: v.first_visible_chapter).content_markdown
 
 
 def _find_backlinks(db: Session, book_id: int, target_slug: str, up_to_chapter: int) -> list[dict]:

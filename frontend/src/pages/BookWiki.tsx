@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight } from 'lucide-react'
-import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing, setStopChapter } from '../lib/api'
+import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing, setStopChapter, deleteWikiPage, mergeWikiPages, updateWikiPage } from '../lib/api'
 import type { BookDetail, WikiPageList, WikiPageContent } from '../lib/api'
 import ChapterSlider from '../components/ChapterSlider'
 import WikiSidebar from '../components/WikiSidebar'
@@ -24,6 +24,7 @@ export default function BookWiki() {
   const [autoProcess, setAutoProcess] = useState(false)
   const [continuing, setContinuing] = useState(false)
   const [stopChapterInput, setStopChapterInput] = useState<string>('')
+  const [merging, setMerging] = useState(false)
 
   useEffect(() => {
     getBook(id).then(b => {
@@ -110,6 +111,33 @@ export default function BookWiki() {
     navigate('/')
   }
 
+  async function handleDeletePage() {
+    if (!currentPage) return
+    await deleteWikiPage(id, currentPage.slug)
+    setCurrentPage(null)
+    setSelectedSlug(null)
+    loadPages()
+  }
+
+  async function handleMergePage(targetSlug: string) {
+    if (!currentPage) return
+    setMerging(true)
+    try {
+      const merged = await mergeWikiPages(id, currentPage.slug, targetSlug)
+      setCurrentPage(merged)
+      loadPages()
+    } finally {
+      setMerging(false)
+    }
+  }
+
+  async function handleEditPage(title: string, content: string) {
+    if (!currentPage) return
+    const updated = await updateWikiPage(id, currentPage.slug, title, content, effectiveChapter)
+    setCurrentPage(updated)
+    loadPages()
+  }
+
   if (error) {
     return (
       <div className="p-8 text-center">
@@ -154,7 +182,7 @@ export default function BookWiki() {
             <h1 className="font-semibold text-sm leading-tight truncate">{book.title}</h1>
             {book.author && <p className="text-xs text-ink-muted truncate">{book.author}</p>}
           </div>
-          <GenerationStatus book={book} />
+          {!isProcessing && <GenerationStatus book={book} />}
           <button
             onClick={handleDelete}
             title="Delete book and wiki"
@@ -291,6 +319,16 @@ export default function BookWiki() {
                     ...pages.places.map(p => p.slug),
                     ...pages.events.map(p => p.slug),
                   ]) : undefined}
+                  sameTypePages={pages ? [
+                    ...pages.summaries,
+                    ...pages.characters,
+                    ...pages.places,
+                    ...pages.events,
+                  ].filter(p => p.page_type === currentPage.page_type) : []}
+                  onDelete={handleDeletePage}
+                  onMerge={handleMergePage}
+                  onEdit={handleEditPage}
+                  merging={merging}
                 />
               ) : (
                 <div className="text-center text-ink-muted pt-16 text-sm">
