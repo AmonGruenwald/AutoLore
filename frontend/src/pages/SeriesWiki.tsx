@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Loader2, AlertCircle } from 'lucide-react'
+import { ArrowLeft, Loader2, AlertCircle, Menu } from 'lucide-react'
 import { getBooks, getSeries, getSeriesWikiPages, getWikiPage } from '../lib/api'
 import type { WikiPageList, WikiPageContent, Series, Book } from '../lib/api'
 import WikiSidebar from '../components/WikiSidebar'
@@ -21,6 +21,7 @@ export default function SeriesWiki() {
   const [selectedBookId, setSelectedBookId] = useState<number | null>(null)
   const [currentPage, setCurrentPage] = useState<WikiPageContent | null>(null)
   const [loadingPage, setLoadingPage] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const series = seriesList.find(s => s.id === id)
 
@@ -96,10 +97,17 @@ export default function SeriesWiki() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)]">
-      <div className="bg-parchment-50 border-b border-parchment-300 px-6 py-3">
+      <div className="bg-parchment-50 border-b border-parchment-300 px-4 md:px-6 py-3">
         <div className="flex items-center gap-3">
           <button onClick={() => navigate('/')} className="text-ink-muted hover:text-ink">
             <ArrowLeft size={18} />
+          </button>
+          <button
+            onClick={() => setSidebarOpen(v => !v)}
+            className="md:hidden text-ink-muted hover:text-ink"
+            aria-label="Toggle navigation"
+          >
+            <Menu size={18} />
           </button>
           <h1 className="font-bold text-lg">{series.name}</h1>
           <span className="text-xs text-ink-muted">Series Wiki</span>
@@ -112,16 +120,34 @@ export default function SeriesWiki() {
         onChange={c => setGlobalChapter(c)}
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-56 border-r border-parchment-300 bg-parchment-50 overflow-y-auto shrink-0 py-2">
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* Mobile backdrop */}
+        {sidebarOpen && (
+          <div
+            className="absolute inset-0 z-10 bg-black/20 md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        {/* Sidebar — overlay on mobile, static on desktop */}
+        <aside className={[
+          'absolute inset-y-0 left-0 z-20 transition-transform duration-200',
+          'md:relative md:translate-x-0',
+          'w-56 border-r border-parchment-300 bg-parchment-50 overflow-y-auto shrink-0 py-2',
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+        ].join(' ')}>
           {pages ? (
-            <WikiSidebar pages={pages} selectedSlug={selectedSlug} onSelect={handleSelect} />
+            <WikiSidebar
+              pages={pages}
+              selectedSlug={selectedSlug}
+              onSelect={(slug, bookId) => { handleSelect(slug, bookId); setSidebarOpen(false) }}
+            />
           ) : (
             <div className="p-4 text-center"><Loader2 size={16} className="animate-spin mx-auto" /></div>
           )}
         </aside>
 
-        <main className="flex-1 overflow-y-auto p-8">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8">
           {loadingPage ? (
             <div className="flex justify-center pt-16"><Loader2 size={24} className="animate-spin" /></div>
           ) : currentPage ? (

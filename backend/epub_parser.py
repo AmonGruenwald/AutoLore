@@ -38,6 +38,45 @@ def _is_content_chapter(item: epub.EpubHtml) -> bool:
     return not any(p in name for p in skip_patterns)
 
 
+# Titles that clearly indicate front/back matter rather than story content.
+# Matched after normalising to lowercase with punctuation stripped.
+_SKIP_TITLES: frozenset[str] = frozenset({
+    "preface",
+    "foreword",
+    "acknowledgements", "acknowledgement",
+    "acknowledgments", "acknowledgment",
+    "dedication",
+    "epigraph",
+    "introduction",
+    "about the author", "about the authors",
+    "also by", "also by the author", "also by the authors",
+    "bibliography",
+    "index",
+    "glossary",
+    "endnotes",
+    "notes",
+    "further reading",
+    "authors note", "author note",       # apostrophe stripped by normalisation
+    "a note from the author",
+    "a note on the text",
+    "a note to readers",
+    "from the author",
+})
+
+
+def _is_skippable_title(title: str) -> bool:
+    """Return True if the chapter title suggests front/back matter, not story."""
+    # Normalise: lowercase, collapse whitespace, strip punctuation
+    normalised = re.sub(r"[^\w\s]", " ", title.lower())
+    normalised = re.sub(r"\s+", " ", normalised).strip()
+    if normalised in _SKIP_TITLES:
+        return True
+    # "Appendix A", "Appendix I", "Appendix: ..." etc.
+    if normalised.startswith("appendix"):
+        return True
+    return False
+
+
 def _extract_chapter_title(text: str, fallback: str) -> str:
     """Try to find a heading at the start of the chapter text."""
     lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -87,6 +126,9 @@ def parse_epub(file_bytes: bytes) -> ParsedBook:
 
         fallback_title = f"Chapter {chapter_number}"
         chapter_title = _extract_chapter_title(text, fallback_title)
+
+        if _is_skippable_title(chapter_title):
+            continue
 
         chapters.append(ParsedChapter(
             number=chapter_number,

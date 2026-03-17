@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, AlertCircle, Loader2, Trash2 } from 'lucide-react'
+import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu } from 'lucide-react'
 import { getBook, getWikiPages, getWikiPage, deleteBook } from '../lib/api'
 import type { BookDetail, WikiPageList, WikiPageContent } from '../lib/api'
 import ChapterSlider from '../components/ChapterSlider'
@@ -20,6 +20,7 @@ export default function BookWiki() {
   const [currentPage, setCurrentPage] = useState<WikiPageContent | null>(null)
   const [loadingPage, setLoadingPage] = useState(false)
   const [error, setError] = useState('')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Load book info on mount
   useEffect(() => {
@@ -114,10 +115,17 @@ export default function BookWiki() {
   return (
     <div className="flex flex-col h-[calc(100vh-48px)]">
       {/* Book header */}
-      <div className="bg-parchment-50 border-b border-parchment-300 px-6 py-3">
+      <div className="bg-parchment-50 border-b border-parchment-300 px-4 md:px-6 py-3">
         <div className="flex items-center gap-3">
           <button onClick={() => navigate('/')} className="text-ink-muted hover:text-ink">
             <ArrowLeft size={18} />
+          </button>
+          <button
+            onClick={() => setSidebarOpen(v => !v)}
+            className="md:hidden text-ink-muted hover:text-ink"
+            aria-label="Toggle navigation"
+          >
+            <Menu size={18} />
           </button>
           <div className="flex-1">
             <h1 className="font-bold text-lg leading-tight">{book.title}</h1>
@@ -174,14 +182,27 @@ export default function BookWiki() {
             />
           )}
 
-          <div className="flex flex-1 overflow-hidden">
-            {/* Sidebar */}
-            <aside className="w-56 border-r border-parchment-300 bg-parchment-50 overflow-y-auto shrink-0 py-2">
+          <div className="relative flex flex-1 overflow-hidden">
+            {/* Mobile backdrop */}
+            {sidebarOpen && (
+              <div
+                className="absolute inset-0 z-10 bg-black/20 md:hidden"
+                onClick={() => setSidebarOpen(false)}
+              />
+            )}
+
+            {/* Sidebar — overlay on mobile, static on desktop */}
+            <aside className={[
+              'absolute inset-y-0 left-0 z-20 transition-transform duration-200',
+              'md:relative md:translate-x-0',
+              'w-56 border-r border-parchment-300 bg-parchment-50 overflow-y-auto shrink-0 py-2',
+              sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+            ].join(' ')}>
               {pages ? (
                 <WikiSidebar
                   pages={pages}
                   selectedSlug={selectedSlug}
-                  onSelect={setSelectedSlug}
+                  onSelect={slug => { setSelectedSlug(slug); setSidebarOpen(false) }}
                 />
               ) : (
                 <div className="p-4 text-center"><Loader2 size={16} className="animate-spin mx-auto" /></div>
@@ -189,7 +210,7 @@ export default function BookWiki() {
             </aside>
 
             {/* Main content */}
-            <main className="flex-1 overflow-y-auto p-8">
+            <main className="flex-1 overflow-y-auto p-4 md:p-8">
               {loadingPage ? (
                 <div className="flex justify-center pt-16"><Loader2 size={24} className="animate-spin" /></div>
               ) : currentPage ? (
