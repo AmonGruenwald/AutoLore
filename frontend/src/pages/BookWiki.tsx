@@ -367,7 +367,7 @@ export default function BookWiki() {
               )}
             </aside>
 
-            <main className="flex-1 overflow-y-auto p-5 md:p-8 lg:p-10">
+            <main className="flex-1 overflow-y-auto px-6 py-6 md:px-10 md:py-8">
               {/* Home / overview */}
               {!selectedSlug && book && (
                 <WikiHome
