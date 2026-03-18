@@ -334,6 +334,54 @@ async def update_wiki_page(
     }
 
 
+@router.get("/{book_id}/blurb")
+async def get_story_blurb(book_id: int, up_to_chapter: int, db: Session = Depends(get_db)):
+    """
+    Generate a short AI blurb describing where the story currently stands.
+    Uses the most recent chapter summary wiki pages as context.
+    """
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+
+    api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
+    model_row = db.query(Setting).filter_by(key="openrouter_model").first()
+    api_key = api_key_row.value if api_key_row else ""
+    model = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+
+    if not api_key:
+        raise HTTPException(400, "No API key configured")
+
+    # Collect summary pages visible at this chapter, sorted by chapter number
+    summary_pages = (
+        db.query(WikiPage)
+        .filter_by(book_id=book_id, page_type="summary")
+        .all()
+    )
+
+    recent: list[dict] = []
+    for page in summary_pages:
+        visible = [v for v in page.versions if v.first_visible_chapter <= up_to_chapter]
+        if not visible:
+            continue
+        latest = max(visible, key=lambda v: v.first_visible_chapter)
+        recent.append({
+            "number": latest.first_visible_chapter,
+            "title": page.title,
+            "content": latest.content_markdown,
+        })
+
+    recent.sort(key=lambda s: s["number"])
+    # Use up to the 3 most recent chapters for context
+    recent = recent[-3:]
+
+    if not recent:
+        return {"blurb": ""}
+
+    blurb = await ai_service.generate_story_blurb(api_key, model, recent, up_to_chapter)
+    return {"blurb": blurb.strip()}
+
+
 @router.get("/{book_id}/graph")
 def get_wiki_graph(book_id: int, up_to_chapter: int, db: Session = Depends(get_db)):
     """

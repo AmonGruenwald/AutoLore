@@ -334,6 +334,7 @@ export default function BookWiki() {
                 <CharacterGraph
                   bookId={id}
                   effectiveChapter={effectiveChapter}
+                  pages={pages}
                   onNavigate={slug => { setSelectedSlug(slug); setGraphOpen(false) }}
                 />
               </div>

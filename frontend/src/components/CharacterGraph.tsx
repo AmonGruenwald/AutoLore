@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as d3 from 'd3'
 import { getWikiGraph } from '../lib/api'
-import type { GraphNode, GraphEdge } from '../lib/api'
+import type { GraphNode, GraphEdge, WikiPageList } from '../lib/api'
 import { Loader2 } from 'lucide-react'
 
 // D3 simulation node extends GraphNode with mutable position fields
@@ -22,6 +22,7 @@ interface SimEdge {
 interface Props {
   bookId: number
   effectiveChapter: number
+  pages: WikiPageList | null
   onNavigate: (slug: string) => void
 }
 
@@ -43,7 +44,7 @@ function nodeRadius(type: string) {
   return type === 'character' ? 22 : 18
 }
 
-export default function CharacterGraph({ bookId, effectiveChapter, onNavigate }: Props) {
+export default function CharacterGraph({ bookId, effectiveChapter, pages, onNavigate }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const simulationRef = useRef<d3.Simulation<SimNode, SimEdge> | null>(null)
@@ -61,6 +62,20 @@ export default function CharacterGraph({ bookId, effectiveChapter, onNavigate }:
   const buildGraph = useCallback(async () => {
     try {
       const data = await getWikiGraph(bookId, effectiveChapter)
+
+      // Only show nodes that have a confirmed wiki page (present in the pages list)
+      // and are not chapter summaries. This excludes stub WikiPage rows that were
+      // created but never had content generated (e.g. due to a failed AI call).
+      const knownSlugs = pages
+        ? new Set([
+            ...pages.characters.map(p => p.slug),
+            ...pages.places.map(p => p.slug),
+            ...pages.events.map(p => p.slug),
+          ])
+        : null
+      if (knownSlugs) {
+        data.nodes = data.nodes.filter(n => knownSlugs.has(n.id))
+      }
       const svg = svgRef.current
       const container = containerRef.current
       if (!svg || !container) return
@@ -300,7 +315,7 @@ export default function CharacterGraph({ bookId, effectiveChapter, onNavigate }:
       setError('Failed to load graph')
       setLoading(false)
     }
-  }, [bookId, effectiveChapter, onNavigate])
+  }, [bookId, effectiveChapter, pages, onNavigate])
 
   useEffect(() => {
     setLoading(true)
