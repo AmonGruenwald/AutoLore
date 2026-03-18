@@ -56,6 +56,17 @@ export default function WikiHome({ book, pages, effectiveChapter, onNavigate }: 
       .slice(0, 8)
   }, [pages])
 
+  // Map chapter number → summary slug
+  const chapterSummarySlug = useMemo(() => {
+    const map = new Map<number, string>()
+    if (pages) {
+      for (const s of pages.summaries) {
+        map.set(s.first_visible_chapter, s.slug)
+      }
+    }
+    return map
+  }, [pages])
+
   // Build the chapter grid — use book.chapters if available, else synthesise
   const allChapters = useMemo(() => {
     if (book.chapters.length > 0) return book.chapters
@@ -142,17 +153,29 @@ export default function WikiHome({ book, pages, effectiveChapter, onNavigate }: 
             {allChapters.map(ch => {
               const processed = ch.number <= totalProcessed
               const isCurrent = ch.number === effectiveChapter
-              return (
+              const summarySlug = chapterSummarySlug.get(ch.number)
+              const clickable = processed && summarySlug
+              return clickable ? (
+                <button
+                  key={ch.number}
+                  onClick={() => onNavigate(summarySlug!)}
+                  title={ch.title || `Chapter ${ch.number}`}
+                  className={[
+                    'relative w-6 h-6 rounded text-[9px] font-mono flex items-center justify-center transition-all duration-300 select-none cursor-pointer',
+                    isCurrent
+                      ? 'bg-amber-500 text-white ring-2 ring-amber-400 ring-offset-1 ring-offset-parchment-50 scale-110 z-10 font-bold'
+                      : 'bg-amber-200 text-amber-800 hover:bg-amber-300',
+                  ].join(' ')}
+                >
+                  {ch.number}
+                </button>
+              ) : (
                 <div
                   key={ch.number}
                   title={ch.title || `Chapter ${ch.number}`}
                   className={[
                     'relative w-6 h-6 rounded text-[9px] font-mono flex items-center justify-center transition-all duration-300 select-none',
-                    isCurrent
-                      ? 'bg-amber-500 text-white ring-2 ring-amber-400 ring-offset-1 ring-offset-parchment-50 scale-110 z-10 font-bold'
-                      : processed
-                        ? 'bg-amber-200 text-amber-800 hover:bg-amber-300'
-                        : 'bg-parchment-200 text-ink-muted/30',
+                    'bg-parchment-200 text-ink-muted/30',
                   ].join(' ')}
                 >
                   {ch.number}

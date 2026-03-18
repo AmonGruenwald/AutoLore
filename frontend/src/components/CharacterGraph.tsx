@@ -81,7 +81,7 @@ export default function CharacterGraph({ bookId, effectiveChapter, onNavigate }:
         }
       }
 
-      const simNodes: SimNode[] = data.nodes.map(n => {
+      const simNodes: SimNode[] = data.nodes.filter(n => n.page_type === 'character').map(n => {
         const old = oldPositions.get(n.id)
         return {
           ...n,
