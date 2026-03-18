@@ -151,7 +151,7 @@ export default function SeriesWiki() {
         <aside className={[
           'absolute inset-y-0 left-0 z-20 transition-transform duration-200',
           'md:relative md:translate-x-0',
-          'w-56 border-r border-parchment-300 bg-parchment-50 overflow-y-auto shrink-0 py-2',
+          'w-64 border-r border-parchment-300 bg-parchment-50 overflow-y-auto shrink-0 py-2',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full',
         ].join(' ')}>
           {pages ? (

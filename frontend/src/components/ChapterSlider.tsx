@@ -12,7 +12,7 @@ export default function ChapterSlider({ totalChapters, value, onChange, chapterT
 
   return (
     <div className="border-b border-parchment-200 px-4 md:px-6 py-2 shrink-0">
-      <div className="flex items-center gap-3 max-w-2xl">
+      <div className="flex items-center gap-3">
         <BookOpen size={13} className="text-ink-muted shrink-0" />
         <input
           type="range"

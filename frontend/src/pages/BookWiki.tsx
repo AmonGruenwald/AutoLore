@@ -350,7 +350,7 @@ export default function BookWiki() {
             <aside className={[
               'absolute inset-y-0 left-0 z-20 transition-transform duration-200',
               'md:relative md:translate-x-0',
-              'w-56 border-r border-parchment-200 bg-parchment-50 overflow-y-auto shrink-0 py-2',
+              'w-64 border-r border-parchment-200 bg-parchment-50 overflow-y-auto shrink-0 py-2',
               sidebarOpen ? 'translate-x-0' : '-translate-x-full',
             ].join(' ')}>
               {pages ? (
@@ -367,7 +367,7 @@ export default function BookWiki() {
               )}
             </aside>
 
-            <main className="flex-1 overflow-y-auto p-5 md:p-10">
+            <main className="flex-1 overflow-y-auto p-5 md:p-8 lg:p-10">
               {/* Home / overview */}
               {!selectedSlug && book && (
                 <WikiHome
