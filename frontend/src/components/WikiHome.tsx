@@ -1,5 +1,5 @@
-import { useMemo, useEffect, useState } from 'react'
-import { BookOpen, Users, MapPin, Zap, Loader2, BookOpenCheck } from 'lucide-react'
+import { useMemo, useEffect, useState, useCallback } from 'react'
+import { BookOpen, Users, MapPin, Zap, Loader2, BookOpenCheck, RefreshCw } from 'lucide-react'
 import type { BookDetail, WikiPageList, WikiPageSummary } from '../lib/api'
 import { getStoryBlurb } from '../lib/api'
 
@@ -35,15 +35,19 @@ export default function WikiHome({ book, pages, effectiveChapter, onNavigate }: 
   const [blurb, setBlurb] = useState('')
   const [blurbLoading, setBlurbLoading] = useState(false)
 
-  useEffect(() => {
+  const fetchBlurb = useCallback((force: boolean) => {
     if (!pages || pages.summaries.length === 0) return
-    setBlurb('')
     setBlurbLoading(true)
-    getStoryBlurb(book.id, effectiveChapter)
+    getStoryBlurb(book.id, effectiveChapter, force)
       .then(r => setBlurb(r.blurb))
       .catch(() => {})
       .finally(() => setBlurbLoading(false))
   }, [book.id, effectiveChapter, pages])
+
+  useEffect(() => {
+    setBlurb('')
+    fetchBlurb(false)
+  }, [fetchBlurb])
 
   const totalProcessed = book.generation_status === 'done'
     ? book.total_chapters
@@ -111,7 +115,16 @@ export default function WikiHome({ book, pages, effectiveChapter, onNavigate }: 
               <span>Generating story summary…</span>
             </div>
           ) : (
-            <p className="text-sm text-ink leading-relaxed italic">{blurb}</p>
+            <div className="flex items-start gap-2">
+              <p className="flex-1 text-sm text-ink leading-relaxed italic">{blurb}</p>
+              <button
+                onClick={() => fetchBlurb(true)}
+                title="Regenerate summary"
+                className="shrink-0 mt-0.5 text-amber-500 hover:text-amber-700 transition-colors"
+              >
+                <RefreshCw size={12} />
+              </button>
+            </div>
           )}
         </section>
       )}

@@ -50,6 +50,12 @@ export default function CharacterGraph({ bookId, effectiveChapter, pages, onNavi
   const simulationRef = useRef<d3.Simulation<SimNode, SimEdge> | null>(null)
   const nodesRef = useRef<SimNode[]>([])
   const edgesRef = useRef<SimEdge[]>([])
+  // Use refs for props that don't need to trigger simulation rebuilds
+  const onNavigateRef = useRef(onNavigate)
+  const pagesRef = useRef(pages)
+
+  useEffect(() => { onNavigateRef.current = onNavigate }, [onNavigate])
+  useEffect(() => { pagesRef.current = pages }, [pages])
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -66,11 +72,12 @@ export default function CharacterGraph({ bookId, effectiveChapter, pages, onNavi
       // Only show nodes that have a confirmed wiki page (present in the pages list)
       // and are not chapter summaries. This excludes stub WikiPage rows that were
       // created but never had content generated (e.g. due to a failed AI call).
-      const knownSlugs = pages
+      const currentPages = pagesRef.current
+      const knownSlugs = currentPages
         ? new Set([
-            ...pages.characters.map(p => p.slug),
-            ...pages.places.map(p => p.slug),
-            ...pages.events.map(p => p.slug),
+            ...currentPages.characters.map(p => p.slug),
+            ...currentPages.places.map(p => p.slug),
+            ...currentPages.events.map(p => p.slug),
           ])
         : null
       if (knownSlugs) {
@@ -191,7 +198,7 @@ export default function CharacterGraph({ bookId, effectiveChapter, pages, onNavi
             })
         )
         .on('click', (_event, d) => {
-          onNavigate(d.slug)
+          onNavigateRef.current(d.slug)
         })
         .on('mouseenter', (event, d) => {
           const rect = containerRef.current?.getBoundingClientRect()
@@ -276,7 +283,9 @@ export default function CharacterGraph({ bookId, effectiveChapter, pages, onNavi
           .strength(0.5)
         )
         .force('charge', d3.forceManyBody().strength(-220))
-        .force('center', d3.forceCenter(width / 2, height / 2).strength(0.08))
+        .force('center', d3.forceCenter(width / 2, height / 2).strength(0.12))
+        .force('x', d3.forceX(width / 2).strength(0.04))
+        .force('y', d3.forceY(height / 2).strength(0.04))
         .force('collision', d3.forceCollide<SimNode>(d => nodeRadius(d.page_type) + 8))
         .alphaDecay(0.028)
 
@@ -315,7 +324,7 @@ export default function CharacterGraph({ bookId, effectiveChapter, pages, onNavi
       setError('Failed to load graph')
       setLoading(false)
     }
-  }, [bookId, effectiveChapter, pages, onNavigate])
+  }, [bookId, effectiveChapter])
 
   useEffect(() => {
     setLoading(true)
@@ -336,7 +345,9 @@ export default function CharacterGraph({ bookId, effectiveChapter, pages, onNavi
         const h = c.clientHeight
         d3.select(svg).attr('width', w).attr('height', h)
         simulationRef.current
-          ?.force('center', d3.forceCenter(w / 2, h / 2).strength(0.08))
+          ?.force('center', d3.forceCenter(w / 2, h / 2).strength(0.12))
+          .force('x', d3.forceX(w / 2).strength(0.04))
+          .force('y', d3.forceY(h / 2).strength(0.04))
           .alpha(0.2)
           .restart()
       }

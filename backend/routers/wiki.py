@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from database import Book, WikiPage, WikiPageVersion, Series, Setting, get_db
+from database import Book, WikiPage, WikiPageVersion, Series, Setting, WikiBlurb, get_db
 import ai_service
 
 router = APIRouter(prefix="/api/wiki", tags=["wiki"])
@@ -335,14 +335,25 @@ async def update_wiki_page(
 
 
 @router.get("/{book_id}/blurb")
-async def get_story_blurb(book_id: int, up_to_chapter: int, db: Session = Depends(get_db)):
+async def get_story_blurb(
+    book_id: int,
+    up_to_chapter: int,
+    force: bool = False,
+    db: Session = Depends(get_db),
+):
     """
-    Generate a short AI blurb describing where the story currently stands.
-    Uses the most recent chapter summary wiki pages as context.
+    Return a short AI blurb describing where the story currently stands.
+    The blurb is cached in the database; pass ?force=true to regenerate it.
     """
     book = db.query(Book).filter_by(id=book_id).first()
     if not book:
         raise HTTPException(404, "Book not found")
+
+    # Return cached blurb if available and not forcing regeneration
+    if not force:
+        cached = db.query(WikiBlurb).filter_by(book_id=book_id, up_to_chapter=up_to_chapter).first()
+        if cached:
+            return {"blurb": cached.blurb}
 
     api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
     model_row = db.query(Setting).filter_by(key="openrouter_model").first()
@@ -379,7 +390,17 @@ async def get_story_blurb(book_id: int, up_to_chapter: int, db: Session = Depend
         return {"blurb": ""}
 
     blurb = await ai_service.generate_story_blurb(api_key, model, recent, up_to_chapter)
-    return {"blurb": blurb.strip()}
+    blurb = blurb.strip()
+
+    # Store / update in cache
+    cached = db.query(WikiBlurb).filter_by(book_id=book_id, up_to_chapter=up_to_chapter).first()
+    if cached:
+        cached.blurb = blurb
+    else:
+        db.add(WikiBlurb(book_id=book_id, up_to_chapter=up_to_chapter, blurb=blurb))
+    db.commit()
+
+    return {"blurb": blurb}
 
 
 @router.get("/{book_id}/graph")
