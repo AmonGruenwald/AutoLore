@@ -197,7 +197,7 @@ export default function BookWiki() {
             <ArrowLeft size={16} />
           </button>
           <button
-            onClick={() => setSidebarOpen(v => !v)}
+            onClick={() => { setSidebarOpen(v => !v); setGraphOpen(false) }}
             className="md:hidden text-ink-muted hover:text-ink"
           >
             <Menu size={16} />
