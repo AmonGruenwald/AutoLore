@@ -192,7 +192,8 @@ Instructions:
 - When mentioning a character, place, or important event, use wiki-link syntax:
   [[Character:Name]], [[Place:Name]], [[Event:Name]]
 - Use the most complete name for each entity as it appears in the text.
-- After the summary, output a JSON block listing all entities you linked to.
+- After the summary, output a JSON block listing ALL characters, places, and events
+  mentioned in this chapter — include every entity whether or not you used [[]] syntax for it.
 - For each entity set "significance" to "major" if ANY of the following apply:
   they have an active role, dialogue, revealed attributes (appearance, personality,
   backstory, relationships, title, status), their situation changes, they perform
@@ -214,7 +215,7 @@ Output format:
         {"role": "user", "content": prompt},
     ]
 
-    raw = await _call_openrouter(api_key, model, messages, max_tokens=1200)
+    raw = await _call_openrouter(api_key, model, messages, max_tokens=2000)
     return _parse_summary_response(raw, chapter["number"])
 
 
