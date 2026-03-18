@@ -253,9 +253,8 @@ async def update_wiki_page(
     new_slug = _slugify(body.title)
     if new_slug != old_slug:
         page.slug = new_slug
-        type_cap = page.page_type.capitalize()
-        old_link_text = f"[[{type_cap}:{old_title}]]"
-        new_link_text = f"[[{type_cap}:{body.title}]]"
+        old_link_text = f"[[{old_title}]]"
+        new_link_text = f"[[{body.title}]]"
 
         # Rewrite every version in the book that references the old slug/title
         other_versions = (

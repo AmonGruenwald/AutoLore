@@ -168,7 +168,7 @@ async def generate_chapter_summary(
     Returns:
       {
         "clean_title": "short descriptive chapter title",
-        "summary": "markdown text with [[Type:Name]] links",
+        "summary": "markdown text with [[Name]] links",
         "entities": [{"type": "character|place|event", "name": "...", "slug": "..."}]
       }
     known_entities: unused — kept for API compatibility.
@@ -204,7 +204,7 @@ Instructions:
 - Write a wiki-style summary of this chapter (3-8 paragraphs).
 - Only include information from the text above.
 - When mentioning a character, place, or important event, use wiki-link syntax:
-  [[Character:Name]], [[Place:Name]], [[Event:Name]]
+  [[Name]] (e.g. [[Aragorn]], [[Minas Tirith]], [[Battle of Helm's Deep]])
 - Use the most complete name for each entity as it appears in the text.
 - After the summary, output a JSON block listing all entities you linked to.
 - For each entity set "significance" to "major" if ANY of the following apply:
@@ -270,7 +270,7 @@ async def generate_entity_page(
     """
     Incrementally update an entity wiki page using only the current chapter summary
     and the existing page content.  No raw chapter text is sent.
-    Returns updated markdown content with [[Type:Name]] links.
+    Returns updated markdown content with [[Name]] links.
     """
     type_instructions = {
         "character": "physical description, personality, relationships, role in story, notable actions",
@@ -303,7 +303,7 @@ Instructions:
   value — do not keep both. The page should read as a current description, not a history log.
 - For permanent facts (origin, backstory, fixed traits): retain them unless contradicted.
 - Add any genuinely new information not already covered.
-- Use [[Character:Name]], [[Place:Name]], [[Event:Name]] syntax for cross-references.
+- Use [[Name]] syntax for cross-references to characters, places, and events.
 - Use markdown formatting (## headings, bullet lists where appropriate).
 - Do not include a top-level title.
 - Output the complete updated page."""
@@ -317,7 +317,7 @@ Source — Chapter {chapter_number} summary:
 
 Extract ONLY information about "{entity_name}" and write a wiki page covering: {type_instructions}.
 - Only include details explicitly stated in the summary above that concern "{entity_name}".
-- Use [[Character:Name]], [[Place:Name]], [[Event:Name]] syntax for cross-references.
+- Use [[Name]] syntax for cross-references to characters, places, and events.
 - Use markdown formatting (## headings, bullet lists where appropriate).
 - Do not include a top-level title."""
 
@@ -427,7 +427,7 @@ Page 2: "{title_b}"
 Instructions:
 - These pages describe the same {page_type}, possibly under different names or from different angles.
 - Combine all unique information; remove duplicate sentences.
-- Preserve all [[Character:Name]], [[Place:Name]], [[Event:Name]] wiki-link syntax.
+- Preserve all [[Name]] wiki-link syntax.
 - Use markdown formatting (## headings, bullet lists where appropriate).
 - Do NOT include a top-level title in the content — that goes in <title> only.
 - Pick the most complete, recognisable name for the merged page.
@@ -484,7 +484,7 @@ Instructions:
 - Identify what the user added, removed, or changed between the ORIGINAL and USER'S EDITED VERSION.
 - Apply those same changes to the LATER VERSION.
 - Keep all information in the LATER VERSION that is not contradicted by the user's edit.
-- Preserve all [[Character:Name]], [[Place:Name]], [[Event:Name]] wiki-link syntax.
+- Preserve all [[Name]] wiki-link syntax.
 - Do NOT include a top-level title.
 - Output only the updated content, no commentary.
 

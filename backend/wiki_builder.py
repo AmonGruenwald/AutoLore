@@ -23,17 +23,16 @@ async def _get_settings(db: Session) -> tuple[str, str]:
 
 
 def resolve_links(markdown: str) -> list[dict]:
-    """Extract [[Type:Name]] links from markdown and return as structured list."""
-    pattern = re.compile(r"\[\[(\w+):([^\]]+)\]\]")
+    """Extract [[Name]] links from markdown and return as structured list."""
+    pattern = re.compile(r"\[\[([^\]]+)\]\]")
     links = []
     seen = set()
     for match in pattern.finditer(markdown):
-        page_type = match.group(1).lower()
-        name = match.group(2).strip()
+        name = match.group(1).strip()
         slug = _slugify(name)
         if slug not in seen:
             seen.add(slug)
-            links.append({"text": name, "slug": slug, "page_type": page_type})
+            links.append({"text": name, "slug": slug})
     return links
 
 
