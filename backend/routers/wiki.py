@@ -237,10 +237,20 @@ async def update_wiki_page(
     target.content_markdown = body.content
     target.outgoing_links = new_links
     flag_modified(target, "outgoing_links")
+    # Enforce title uniqueness within the book (excluding this page)
+    if body.title != old_title:
+        conflict = db.query(WikiPage).filter(
+            WikiPage.book_id == book_id,
+            WikiPage.title == body.title,
+            WikiPage.id != page.id,
+        ).first()
+        if conflict:
+            raise HTTPException(400, f"A page with the title '{body.title}' already exists in this book")
+
     page.title = body.title
 
     # Slug is always derived from title — keep them in sync
-    new_slug = _slugify(page.page_type + "-" + body.title)
+    new_slug = _slugify(body.title)
     if new_slug != old_slug:
         page.slug = new_slug
         type_cap = page.page_type.capitalize()

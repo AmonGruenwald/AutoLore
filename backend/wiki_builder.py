@@ -30,7 +30,7 @@ def resolve_links(markdown: str) -> list[dict]:
     for match in pattern.finditer(markdown):
         page_type = match.group(1).lower()
         name = match.group(2).strip()
-        slug = _slugify(page_type + "-" + name)
+        slug = _slugify(name)
         if slug not in seen:
             seen.add(slug)
             links.append({"text": name, "slug": slug, "page_type": page_type})
@@ -38,7 +38,7 @@ def resolve_links(markdown: str) -> list[dict]:
 
 
 def _get_or_create_wiki_page(db: Session, book_id: int, page_type: str, name: str) -> WikiPage:
-    slug = _slugify(page_type + "-" + name)
+    slug = _slugify(name)
     page = db.query(WikiPage).filter_by(book_id=book_id, slug=slug).first()
     if not page:
         page = WikiPage(book_id=book_id, page_type=page_type, slug=slug, title=name)

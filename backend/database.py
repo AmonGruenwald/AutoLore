@@ -1,6 +1,6 @@
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, ForeignKey,
-    DateTime, JSON, Boolean, Float, event
+    DateTime, JSON, Boolean, Float, event, UniqueConstraint
 )
 from sqlalchemy import text as _text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -81,6 +81,7 @@ class Chapter(Base):
 
 class WikiPage(Base):
     __tablename__ = "wiki_pages"
+    __table_args__ = (UniqueConstraint("book_id", "title", name="uq_wiki_page_book_title"),)
     id = Column(Integer, primary_key=True)
     book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
     page_type = Column(String, nullable=False)  # summary|character|place|event
@@ -125,6 +126,7 @@ def _run_migrations():
         "ALTER TABLE chapters ADD COLUMN clean_title TEXT",
         "ALTER TABLE books ADD COLUMN stop_chapter INTEGER",
         "ALTER TABLE chapters ADD COLUMN one_sentence_summary TEXT",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_wiki_page_book_title ON wiki_pages (book_id, title)",
     ]
     with engine.connect() as conn:
         for sql in migrations:
