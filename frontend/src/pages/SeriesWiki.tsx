@@ -92,6 +92,9 @@ export default function SeriesWiki() {
     const localChapter = Math.max(1, globalChapter - offset)
     const updated = await updateWikiPage(selectedBookId, currentPage.slug, title, content, localChapter)
     setCurrentPage(updated)
+    if (updated.slug !== currentPage.slug) {
+      setSelectedSlug(updated.slug)
+    }
     getSeriesWikiPages(id, globalChapter).then(setPages)
   }
 

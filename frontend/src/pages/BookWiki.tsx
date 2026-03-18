@@ -148,6 +148,9 @@ export default function BookWiki() {
     if (!currentPage) return
     const updated = await updateWikiPage(id, currentPage.slug, title, content, effectiveChapter)
     setCurrentPage(updated)
+    if (updated.slug !== currentPage.slug) {
+      setSelectedSlug(updated.slug)
+    }
     loadPages()
   }
 
