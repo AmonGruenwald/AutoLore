@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight, Clock, MessageCircle } from 'lucide-react'
+import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight, Clock, MessageCircle, Network } from 'lucide-react'
 import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing, setStopChapter, deleteWikiPage, mergeWikiPages, updateWikiPage } from '../lib/api'
 import type { BookDetail, WikiPageList, WikiPageContent } from '../lib/api'
 import ChapterSlider from '../components/ChapterSlider'
@@ -9,6 +9,7 @@ import WikiPageComponent from '../components/WikiPage'
 import WikiHome from '../components/WikiHome'
 import AskPanel from '../components/AskPanel'
 import GenerationStatus from '../components/GenerationStatus'
+import CharacterGraph from '../components/CharacterGraph'
 
 export default function BookWiki() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -28,6 +29,7 @@ export default function BookWiki() {
   const [stopChapterInput, setStopChapterInput] = useState<string>('')
   const [merging, setMerging] = useState(false)
   const [askOpen, setAskOpen] = useState(false)
+  const [graphOpen, setGraphOpen] = useState(false)
 
   useEffect(() => {
     getBook(id).then(b => {
@@ -206,17 +208,30 @@ export default function BookWiki() {
           </div>
           {!isProcessing && <GenerationStatus book={book} />}
           {canBrowse && (
-            <button
-              onClick={() => setAskOpen(v => !v)}
-              title="Ask the wiki"
-              className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
-                askOpen
-                  ? 'bg-amber-50 border-amber-300 text-amber-600'
-                  : 'border-parchment-200 text-ink-muted hover:bg-amber-50 hover:border-amber-200 hover:text-amber-600'
-              }`}
-            >
-              <MessageCircle size={14} />
-            </button>
+            <>
+              <button
+                onClick={() => setGraphOpen(v => !v)}
+                title="Character connection graph"
+                className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
+                  graphOpen
+                    ? 'bg-purple-50 border-purple-300 text-purple-600'
+                    : 'border-parchment-200 text-ink-muted hover:bg-purple-50 hover:border-purple-200 hover:text-purple-500'
+                }`}
+              >
+                <Network size={14} />
+              </button>
+              <button
+                onClick={() => setAskOpen(v => !v)}
+                title="Ask the wiki"
+                className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
+                  askOpen
+                    ? 'bg-amber-50 border-amber-300 text-amber-600'
+                    : 'border-parchment-200 text-ink-muted hover:bg-amber-50 hover:border-amber-200 hover:text-amber-600'
+                }`}
+              >
+                <MessageCircle size={14} />
+              </button>
+            </>
           )}
           <button
             onClick={handleDelete}
@@ -313,6 +328,17 @@ export default function BookWiki() {
           )}
 
           <div className="relative flex flex-1 overflow-hidden" style={{ minWidth: 0 }}>
+            {/* Character graph overlay */}
+            {graphOpen && canBrowse && (
+              <div className="absolute inset-0 z-30 flex flex-col">
+                <CharacterGraph
+                  bookId={id}
+                  effectiveChapter={effectiveChapter}
+                  onNavigate={slug => { setSelectedSlug(slug); setGraphOpen(false) }}
+                />
+              </div>
+            )}
+
             {sidebarOpen && (
               <div
                 className="absolute inset-0 z-10 bg-black/20 md:hidden"

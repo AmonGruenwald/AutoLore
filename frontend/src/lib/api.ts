@@ -66,6 +66,9 @@ export async function confirmDuplicateUpload(file: File): Promise<UploadResult> 
 export const getWikiPages = (bookId: number, upToChapter: number) =>
   request<WikiPageList>(`/wiki/${bookId}/pages?up_to_chapter=${upToChapter}`)
 
+export const getWikiGraph = (bookId: number, upToChapter: number) =>
+  request<WikiGraph>(`/wiki/${bookId}/graph?up_to_chapter=${upToChapter}`)
+
 export const getWikiPage = (bookId: number, slug: string, upToChapter: number) =>
   request<WikiPageContent>(`/wiki/${bookId}/page/${slug}?up_to_chapter=${upToChapter}`)
 
@@ -203,6 +206,24 @@ export interface WikiPageContent {
   outgoing_links: WikiLink[]
   backlinks: { slug: string; title: string; page_type: string }[]
   version_history: { chapter: number }[]
+}
+
+export interface GraphNode {
+  id: string
+  slug: string
+  title: string
+  page_type: string
+  first_visible_chapter: number
+}
+
+export interface GraphEdge {
+  source: string
+  target: string
+}
+
+export interface WikiGraph {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
 }
 
 export interface Series {

@@ -334,6 +334,53 @@ async def update_wiki_page(
     }
 
 
+@router.get("/{book_id}/graph")
+def get_wiki_graph(book_id: int, up_to_chapter: int, db: Session = Depends(get_db)):
+    """
+    Returns nodes and edges for the character/entity connection graph.
+    Nodes = all wiki pages visible at up_to_chapter.
+    Edges = outgoing links between visible pages.
+    """
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+
+    pages = db.query(WikiPage).filter_by(book_id=book_id).all()
+
+    nodes = []
+    slug_to_latest = {}
+
+    for page in pages:
+        visible_versions = [v for v in page.versions if v.first_visible_chapter <= up_to_chapter]
+        if not visible_versions:
+            continue
+        fvc = min(v.first_visible_chapter for v in visible_versions)
+        latest = max(visible_versions, key=lambda v: v.first_visible_chapter)
+        nodes.append({
+            "id": page.slug,
+            "slug": page.slug,
+            "title": page.title,
+            "page_type": page.page_type,
+            "first_visible_chapter": fvc,
+        })
+        slug_to_latest[page.slug] = latest
+
+    visible_slugs = {n["id"] for n in nodes}
+
+    edge_set: set[tuple[str, str]] = set()
+    for slug, latest_version in slug_to_latest.items():
+        for link in (latest_version.outgoing_links or []):
+            target_slug = link.get("slug", "")
+            if target_slug in visible_slugs and slug != target_slug:
+                # Deduplicate undirected edges
+                edge_set.add((min(slug, target_slug), max(slug, target_slug)))
+
+    return {
+        "nodes": nodes,
+        "edges": [{"source": s, "target": t} for s, t in edge_set],
+    }
+
+
 def _latest_content(page: WikiPage) -> str:
     if not page.versions:
         return ""
