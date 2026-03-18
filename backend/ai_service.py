@@ -178,7 +178,7 @@ async def generate_chapter_summary(
     prev_context = ""
     if previous_summaries:
         prev_context = "Previously summarized chapters for context:\n" + "\n".join(
-            f"- Chapter {s['number']}: {s['summary'][:300]}..."
+            f"- Chapter {s['number']}: {s['summary'][:600]}..."
             for s in previous_summaries[-5:]
         )
 
@@ -203,11 +203,13 @@ Current chapter text to summarize:
 Instructions:
 - Write a wiki-style summary of this chapter (3-8 paragraphs).
 - Only include information from the text above.
-- When mentioning a character, place, or important event, use wiki-link syntax:
-  [[Name]] (e.g. [[Aragorn]], [[Minas Tirith]], [[Battle of Helm's Deep]])
+- EVERY time you mention a character, place, or important event — anywhere in the
+  summary — you MUST use wiki-link syntax: [[Character:Name]], [[Place:Name]], [[Event:Name]]
+- This is mandatory for every single mention, not just the first. No entity name
+  should appear in the summary without [[]] brackets around it.
 - Use the most complete name for each entity as it appears in the text.
-- After the summary, output a JSON block listing all entities you linked to.
-- Include characters, places, AND events in the entities list.
+- After the summary, output a JSON block listing ALL characters, places, and events
+  mentioned in this chapter — include every entity whether or not you used [[]] syntax for it.
 - For each entity set "significance" to "major" if ANY of the following apply:
   they have an active role, dialogue, revealed attributes (appearance, personality,
   backstory, relationships, title, status), their situation changes, they perform
@@ -229,7 +231,7 @@ Output format:
         {"role": "user", "content": prompt},
     ]
 
-    raw = await _call_openrouter(api_key, model, messages, max_tokens=1200)
+    raw = await _call_openrouter(api_key, model, messages, max_tokens=2000)
     return _parse_summary_response(raw, chapter["number"])
 
 
@@ -264,8 +266,12 @@ def _parse_summary_response(raw: str, chapter_number: int) -> dict:
                         "slug": _slugify(e["name"]),
                         "significance": e.get("significance", "major").lower(),
                     })
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as exc:
+            import logging
+            logging.warning(
+                "Chapter %s: failed to parse entities JSON: %s — raw block: %.200s",
+                chapter_number, exc, entities_match.group(1).strip()
+            )
 
     return {"clean_title": clean_title, "summary": summary, "entities": entities, "chapter_number": chapter_number}
 
