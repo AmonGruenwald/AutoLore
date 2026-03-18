@@ -207,6 +207,7 @@ Instructions:
   [[Name]] (e.g. [[Aragorn]], [[Minas Tirith]], [[Battle of Helm's Deep]])
 - Use the most complete name for each entity as it appears in the text.
 - After the summary, output a JSON block listing all entities you linked to.
+- Include characters, places, AND events in the entities list.
 - For each entity set "significance" to "major" if ANY of the following apply:
   they have an active role, dialogue, revealed attributes (appearance, personality,
   backstory, relationships, title, status), their situation changes, they perform
@@ -220,7 +221,7 @@ Output format:
 [your summary markdown here]
 </summary>
 <entities>
-[{{"type": "character", "name": "ExactName", "significance": "major"}}, ...]
+[{{"type": "character", "name": "ExactName", "significance": "major"}}, {{"type": "place", "name": "PlaceName", "significance": "major"}}, {{"type": "event", "name": "EventName", "significance": "minor"}}, ...]
 </entities>"""
 
     messages = [
@@ -238,7 +239,18 @@ def _parse_summary_response(raw: str, chapter_number: int) -> dict:
     entities_match = re.search(r"<entities>(.*?)</entities>", raw, re.DOTALL)
 
     clean_title = title_match.group(1).strip() if title_match else None
-    summary = summary_match.group(1).strip() if summary_match else raw.strip()
+    if summary_match:
+        summary = summary_match.group(1).strip()
+    else:
+        # Strip any XML-like tags from the raw output before using as fallback,
+        # to avoid storing malformed AI output (e.g. repeated <title> tags).
+        stripped = re.sub(r"<[^>]+>", "", raw).strip()
+        if not stripped:
+            raise ValueError(
+                f"Chapter {chapter_number}: AI returned malformed output with no usable summary. "
+                "Try regenerating this chapter."
+            )
+        summary = stripped
 
     entities = []
     if entities_match:
