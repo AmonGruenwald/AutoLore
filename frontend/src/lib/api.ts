@@ -69,6 +69,9 @@ export const getWikiPages = (bookId: number, upToChapter: number) =>
 export const getWikiGraph = (bookId: number, upToChapter: number) =>
   request<WikiGraph>(`/wiki/${bookId}/graph?up_to_chapter=${upToChapter}`)
 
+export const getStoryBlurb = (bookId: number, upToChapter: number) =>
+  request<{ blurb: string }>(`/wiki/${bookId}/blurb?up_to_chapter=${upToChapter}`)
+
 export const getWikiPage = (bookId: number, slug: string, upToChapter: number) =>
   request<WikiPageContent>(`/wiki/${bookId}/page/${slug}?up_to_chapter=${upToChapter}`)
 

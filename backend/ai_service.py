@@ -504,6 +504,39 @@ Instructions:
     }
 
 
+async def generate_story_blurb(
+    api_key: str,
+    model: str,
+    recent_summaries: list[dict],
+    chapter_number: int,
+) -> str:
+    """
+    Generate a short 2-3 sentence blurb describing where the story currently stands.
+    recent_summaries: [{"number": int, "title": str, "content": str}, ...]
+    """
+    summaries_text = "\n\n".join(
+        f"Chapter {s['number']} — {s['title']}:\n{s['content'][:600]}"
+        for s in recent_summaries
+    )
+
+    prompt = f"""Based on the following recent chapter summaries from a book, write 2-3 sentences \
+describing where the story currently stands at chapter {chapter_number}. \
+Write in present tense, as if orienting a reader who is about to pick up where they left off. \
+Be specific to the actual events and characters — no generic filler. \
+Do not start with "Currently" or "As of chapter".
+
+Recent chapters:
+{summaries_text}
+
+Write only the blurb, no preamble or labels."""
+
+    messages = [
+        {"role": "system", "content": GROUNDING_SYSTEM},
+        {"role": "user", "content": prompt},
+    ]
+    return await _call_openrouter(api_key, model, messages, temperature=0.3, max_tokens=120)
+
+
 async def check_duplicate_book(
     api_key: str,
     model: str,

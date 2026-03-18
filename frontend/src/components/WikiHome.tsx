@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
+import { useMemo, useEffect, useState } from 'react'
 import { BookOpen, Users, MapPin, Zap, Loader2, BookOpenCheck } from 'lucide-react'
 import type { BookDetail, WikiPageList, WikiPageSummary } from '../lib/api'
+import { getStoryBlurb } from '../lib/api'
 
 interface Props {
   book: BookDetail
@@ -31,6 +32,19 @@ function RecentEntry({ entry, onNavigate }: { entry: WikiPageSummary; onNavigate
 }
 
 export default function WikiHome({ book, pages, effectiveChapter, onNavigate }: Props) {
+  const [blurb, setBlurb] = useState('')
+  const [blurbLoading, setBlurbLoading] = useState(false)
+
+  useEffect(() => {
+    if (!pages || pages.summaries.length === 0) return
+    setBlurb('')
+    setBlurbLoading(true)
+    getStoryBlurb(book.id, effectiveChapter)
+      .then(r => setBlurb(r.blurb))
+      .catch(() => {})
+      .finally(() => setBlurbLoading(false))
+  }, [book.id, effectiveChapter, pages])
+
   const totalProcessed = book.generation_status === 'done'
     ? book.total_chapters
     : book.generation_progress
@@ -87,6 +101,20 @@ export default function WikiHome({ book, pages, effectiveChapter, onNavigate }: 
         </div>
         {book.author && <p className="text-sm text-ink-muted pl-6">{book.author}</p>}
       </div>
+
+      {/* Story blurb */}
+      {(blurbLoading || blurb) && (
+        <section className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+          {blurbLoading ? (
+            <div className="flex items-center gap-2 text-xs text-ink-muted/60">
+              <Loader2 size={11} className="animate-spin shrink-0" />
+              <span>Generating story summary…</span>
+            </div>
+          ) : (
+            <p className="text-sm text-ink leading-relaxed italic">{blurb}</p>
+          )}
+        </section>
+      )}
 
       {/* Processing progress */}
       <section>
