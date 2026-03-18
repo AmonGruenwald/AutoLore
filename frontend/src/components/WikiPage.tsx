@@ -49,9 +49,9 @@ export default function WikiPage({ page, onNavigate, visibleSlugs, sameTypePages
   }
 
   const processedMarkdown = page.content_markdown.replace(
-    /\[\[(\w+):([^\]]+)\]\]/g,
-    (_, type, name) => {
-      const slug = slugify(`${type}-${name}`)
+    /\[\[([^\]]+)\]\]/g,
+    (_, name) => {
+      const slug = slugify(name)
       const exists = visibleSlugs
         ? visibleSlugs.has(slug)
         : (page.outgoing_links.find(l => l.slug === slug)?.exists ?? false)
@@ -218,7 +218,7 @@ export default function WikiPage({ page, onNavigate, visibleSlugs, sameTypePages
           onChange={e => setEditContent(e.target.value)}
           rows={20}
           className="w-full text-sm text-ink font-mono bg-parchment-50 border border-parchment-300 rounded-lg p-3 focus:outline-none focus:ring-1 focus:ring-amber-400 resize-y"
-          placeholder="Page content (Markdown supported, use [[Type:Name]] for wiki links)"
+          placeholder="Page content (Markdown supported, use [[Name]] for wiki links)"
         />
       ) : (
         <div className="wiki-content prose prose-stone max-w-none">
