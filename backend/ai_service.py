@@ -40,7 +40,13 @@ async def _call_openrouter(
             },
             json=body,
         )
-        resp.raise_for_status()
+        if resp.is_error:
+            try:
+                err_body = resp.json()
+                err_msg = err_body.get("error", {}).get("message") or str(err_body)
+            except Exception:
+                err_msg = resp.text
+            raise ValueError(f"OpenRouter {resp.status_code}: {err_msg}")
         data = resp.json()
         choices = data.get("choices") or []
         if not choices:
