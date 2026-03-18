@@ -210,7 +210,7 @@ async def update_wiki_page(
     The version visible at edit_chapter is updated and later versions are
     AI-propagated to incorporate the user's changes.
     """
-    from ai_service import propagate_wiki_edit, _slugify
+    from ai_service import propagate_wiki_edit
     from wiki_builder import resolve_links
 
     page = db.query(WikiPage).filter_by(book_id=book_id, slug=slug).first()
@@ -228,31 +228,14 @@ async def update_wiki_page(
     target = visible[-1]
     target_chapter = target.first_visible_chapter  # save before potential expiry
     old_content = target.content_markdown
-    old_title = page.title
-    old_slug = page.slug
 
-    # Apply user's edit to the target version
-    new_links = resolve_links(body.content)
+    # Apply user's edit to the target version.
+    # Use title-aware link resolution so that links written with a renamed page's
+    # new title resolve to that page's (unchanged) slug.
+    new_links = _resolve_links_aware(body.content, book_id, db)
     target.content_markdown = body.content
     target.outgoing_links = new_links
     page.title = body.title
-
-    # If the title changed, update the slug and fix all references in other pages
-    new_slug = _slugify(page.page_type + "-" + body.title)
-    if new_slug != old_slug:
-        page.slug = new_slug
-        type_cap = page.page_type.capitalize()
-        old_link_text = f"[[{type_cap}:{old_title}]]"
-        new_link_text = f"[[{type_cap}:{body.title}]]"
-        for other_page in db.query(WikiPage).filter(
-            WikiPage.book_id == book_id, WikiPage.id != page.id
-        ).all():
-            for version in other_page.versions:
-                if version.content_markdown and old_link_text in version.content_markdown:
-                    version.content_markdown = version.content_markdown.replace(
-                        old_link_text, new_link_text
-                    )
-                    version.outgoing_links = resolve_links(version.content_markdown)
 
     # Future versions — propagate the user's changes using AI
     future_versions = sorted(
@@ -304,6 +287,30 @@ async def update_wiki_page(
         "backlinks": _find_backlinks(db, book_id, page.slug, body.edit_chapter),
         "version_history": [{"chapter": v.first_visible_chapter} for v in all_versions],
     }
+
+
+def _resolve_links_aware(markdown: str, book_id: int, db: Session) -> list[dict]:
+    """
+    Like resolve_links but uses a title-based fallback for renamed pages.
+
+    When a link such as [[Character:Mithrandir]] is written but no page has
+    slug 'character-mithrandir', we look up by (page_type, title) so that the
+    stored outgoing_links entry carries the page's actual (stable) slug.
+    This lets the frontend resolve the link correctly even after a rename.
+    """
+    from wiki_builder import resolve_links
+    result = []
+    for link in resolve_links(markdown):
+        if not db.query(WikiPage).filter_by(book_id=book_id, slug=link["slug"]).first():
+            match = db.query(WikiPage).filter_by(
+                book_id=book_id,
+                page_type=link["page_type"],
+                title=link["text"],
+            ).first()
+            if match:
+                link = {**link, "slug": match.slug}
+        result.append(link)
+    return result
 
 
 def _latest_content(page: WikiPage) -> str:

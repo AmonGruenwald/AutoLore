@@ -51,10 +51,15 @@ export default function WikiPage({ page, onNavigate, visibleSlugs, sameTypePages
   const processedMarkdown = page.content_markdown.replace(
     /\[\[(\w+):([^\]]+)\]\]/g,
     (_, type, name) => {
-      const slug = slugify(`${type}-${name}`)
+      // outgoing_links may store the actual slug of a renamed page (different
+      // from what slugify would compute), so prefer that when available.
+      const outLink = page.outgoing_links.find(
+        l => l.text === name && l.page_type === type.toLowerCase()
+      )
+      const slug = outLink?.slug ?? slugify(`${type}-${name}`)
       const exists = visibleSlugs
         ? visibleSlugs.has(slug)
-        : (page.outgoing_links.find(l => l.slug === slug)?.exists ?? false)
+        : (outLink?.exists ?? false)
       return exists
         ? `[${name}](wiki:${slug})`
         : `[${name}](wiki-missing:${slug})`
