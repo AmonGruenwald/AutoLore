@@ -40,8 +40,22 @@ async def _call_openrouter(
             },
             json=body,
         )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        if resp.is_error:
+            try:
+                err_body = resp.json()
+                err_msg = err_body.get("error", {}).get("message") or str(err_body)
+            except Exception:
+                err_msg = resp.text
+            raise ValueError(f"OpenRouter {resp.status_code}: {err_msg}")
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            err = data.get("error") or data
+            raise ValueError(f"API returned no choices: {err}")
+        content = choices[0]["message"]["content"]
+        if content is None:
+            raise ValueError("API returned null content")
+        return content
 
 
 
@@ -154,7 +168,7 @@ async def generate_chapter_summary(
     Returns:
       {
         "clean_title": "short descriptive chapter title",
-        "summary": "markdown text with [[Type:Name]] links",
+        "summary": "markdown text with [[Name]] links",
         "entities": [{"type": "character|place|event", "name": "...", "slug": "..."}]
       }
     known_entities: unused — kept for API compatibility.
@@ -209,7 +223,7 @@ Output format:
 [your summary markdown here]
 </summary>
 <entities>
-[{{"type": "character", "name": "ExactName", "significance": "major"}}, ...]
+[{{"type": "character", "name": "ExactName", "significance": "major"}}, {{"type": "place", "name": "PlaceName", "significance": "major"}}, {{"type": "event", "name": "EventName", "significance": "minor"}}, ...]
 </entities>"""
 
     messages = [
@@ -227,7 +241,18 @@ def _parse_summary_response(raw: str, chapter_number: int) -> dict:
     entities_match = re.search(r"<entities>(.*?)</entities>", raw, re.DOTALL)
 
     clean_title = title_match.group(1).strip() if title_match else None
-    summary = summary_match.group(1).strip() if summary_match else raw.strip()
+    if summary_match:
+        summary = summary_match.group(1).strip()
+    else:
+        # Strip any XML-like tags from the raw output before using as fallback,
+        # to avoid storing malformed AI output (e.g. repeated <title> tags).
+        stripped = re.sub(r"<[^>]+>", "", raw).strip()
+        if not stripped:
+            raise ValueError(
+                f"Chapter {chapter_number}: AI returned malformed output with no usable summary. "
+                "Try regenerating this chapter."
+            )
+        summary = stripped
 
     entities = []
     if entities_match:
@@ -238,7 +263,7 @@ def _parse_summary_response(raw: str, chapter_number: int) -> dict:
                     entities.append({
                         "type": e["type"].lower(),
                         "name": e["name"],
-                        "slug": _slugify(e["type"] + "-" + e["name"]),
+                        "slug": _slugify(e["name"]),
                         "significance": e.get("significance", "major").lower(),
                     })
         except json.JSONDecodeError as exc:
@@ -263,7 +288,7 @@ async def generate_entity_page(
     """
     Incrementally update an entity wiki page using only the current chapter summary
     and the existing page content.  No raw chapter text is sent.
-    Returns updated markdown content with [[Type:Name]] links.
+    Returns updated markdown content with [[Name]] links.
     """
     type_instructions = {
         "character": "physical description, personality, relationships, role in story, notable actions",
@@ -296,7 +321,7 @@ Instructions:
   value — do not keep both. The page should read as a current description, not a history log.
 - For permanent facts (origin, backstory, fixed traits): retain them unless contradicted.
 - Add any genuinely new information not already covered.
-- Use [[Character:Name]], [[Place:Name]], [[Event:Name]] syntax for cross-references.
+- Use [[Name]] syntax for cross-references to characters, places, and events.
 - Use markdown formatting (## headings, bullet lists where appropriate).
 - Do not include a top-level title.
 - Output the complete updated page."""
@@ -310,7 +335,7 @@ Source — Chapter {chapter_number} summary:
 
 Extract ONLY information about "{entity_name}" and write a wiki page covering: {type_instructions}.
 - Only include details explicitly stated in the summary above that concern "{entity_name}".
-- Use [[Character:Name]], [[Place:Name]], [[Event:Name]] syntax for cross-references.
+- Use [[Name]] syntax for cross-references to characters, places, and events.
 - Use markdown formatting (## headings, bullet lists where appropriate).
 - Do not include a top-level title."""
 
@@ -420,7 +445,7 @@ Page 2: "{title_b}"
 Instructions:
 - These pages describe the same {page_type}, possibly under different names or from different angles.
 - Combine all unique information; remove duplicate sentences.
-- Preserve all [[Character:Name]], [[Place:Name]], [[Event:Name]] wiki-link syntax.
+- Preserve all [[Name]] wiki-link syntax.
 - Use markdown formatting (## headings, bullet lists where appropriate).
 - Do NOT include a top-level title in the content — that goes in <title> only.
 - Pick the most complete, recognisable name for the merged page.
@@ -477,7 +502,7 @@ Instructions:
 - Identify what the user added, removed, or changed between the ORIGINAL and USER'S EDITED VERSION.
 - Apply those same changes to the LATER VERSION.
 - Keep all information in the LATER VERSION that is not contradicted by the user's edit.
-- Preserve all [[Character:Name]], [[Place:Name]], [[Event:Name]] wiki-link syntax.
+- Preserve all [[Name]] wiki-link syntax.
 - Do NOT include a top-level title.
 - Output only the updated content, no commentary.
 
@@ -495,6 +520,39 @@ Instructions:
     return {
         "content": content_match.group(1).strip() if content_match else future_content,
     }
+
+
+async def generate_story_blurb(
+    api_key: str,
+    model: str,
+    recent_summaries: list[dict],
+    chapter_number: int,
+) -> str:
+    """
+    Generate a short 2-3 sentence blurb describing where the story currently stands.
+    recent_summaries: [{"number": int, "title": str, "content": str}, ...]
+    """
+    summaries_text = "\n\n".join(
+        f"Chapter {s['number']} — {s['title']}:\n{s['content'][:600]}"
+        for s in recent_summaries
+    )
+
+    prompt = f"""Based on the following recent chapter summaries from a book, write 2-3 sentences \
+describing where the story currently stands at chapter {chapter_number}. \
+Write in present tense, as if orienting a reader who is about to pick up where they left off. \
+Be specific to the actual events and characters — no generic filler. \
+Do not start with "Currently" or "As of chapter".
+
+Recent chapters:
+{summaries_text}
+
+Write only the blurb, no preamble or labels."""
+
+    messages = [
+        {"role": "system", "content": GROUNDING_SYSTEM},
+        {"role": "user", "content": prompt},
+    ]
+    return await _call_openrouter(api_key, model, messages, temperature=0.3, max_tokens=120)
 
 
 async def check_duplicate_book(
