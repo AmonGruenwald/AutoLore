@@ -10,8 +10,9 @@ automatically from the frontend's auto-process toggle.
 import asyncio
 import re
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from database import Book, Chapter, WikiPage, WikiPageVersion, Setting
-from ai_service import generate_chapter_previews, generate_chapter_summary, generate_entity_page, resolve_entity_aliases, _slugify
+from ai_service import generate_chapter_previews, generate_chapter_summary, generate_entity_page, resolve_entity_aliases, find_link_aliases, _slugify
 
 
 async def _get_settings(db: Session) -> tuple[str, str]:
@@ -113,17 +114,117 @@ def _apply_alias_map(
             # Find the slug for this canonical name
             canonical_slug = next(
                 (s for s, info in entity_info.items() if info["name"] == canonical_name),
-                _slugify(entity["type"] + "-" + canonical_name),
+                _slugify(canonical_name),
             )
             type_cap = entity["type"].capitalize()
-            md = md.replace(
-                f"[[{type_cap}:{entity['name']}]]",
-                f"[[{type_cap}:{canonical_name}]]",
-            )
+            # Replace both type-prefixed [[Type:Name]] and bare [[Name]] link forms
+            md = md.replace(f"[[{type_cap}:{entity['name']}]]", f"[[{canonical_name}]]")
+            md = md.replace(f"[[{entity['name']}]]", f"[[{canonical_name}]]")
             updated.append({**entity, "slug": canonical_slug, "name": canonical_name})
         else:
             updated.append(entity)
     return updated, md
+
+
+def _add_alias_to_page(page: WikiPage, alias_name: str) -> bool:
+    """Add alias_name to page.aliases if not already present. Returns True if changed."""
+    current = list(page.aliases or [])
+    if alias_name not in current:
+        current.append(alias_name)
+        page.aliases = current
+        flag_modified(page, "aliases")
+        return True
+    return False
+
+
+def _build_slug_to_page(db: Session, book_id: int) -> dict[str, WikiPage]:
+    """Build a mapping from slug (and alias slugs) to WikiPage for a book."""
+    pages = db.query(WikiPage).filter_by(book_id=book_id).all()
+    index: dict[str, WikiPage] = {}
+    for page in pages:
+        index[page.slug] = page
+        for alias_name in (page.aliases or []):
+            index[_slugify(alias_name)] = page
+    return index
+
+
+async def _resolve_unresolved_links(
+    db: Session,
+    book_id: int,
+    new_versions: list[WikiPageVersion],
+    summary_md: str,
+    api_key: str,
+    model: str,
+) -> None:
+    """
+    Post-processing step: find [[links]] in newly created content whose slugs
+    don't match any existing wiki page (even via aliases), then ask the AI if
+    they're aliases for known pages.  Updates content, outgoing_links, and the
+    matched page's aliases list.
+    """
+    slug_index = _build_slug_to_page(db, book_id)
+
+    # Collect unresolved link names across all new versions
+    unresolved: dict[str, str] = {}  # slug → display name
+    for v in new_versions:
+        for link in (v.outgoing_links or []):
+            slug = link["slug"]
+            if slug not in slug_index:
+                unresolved[slug] = link["text"]
+
+    if not unresolved:
+        return
+
+    # known pages (non-summary) with type and existing aliases for AI context
+    known_pages = {
+        page.slug: {"name": page.title, "type": page.page_type, "aliases": page.aliases or []}
+        for page in db.query(WikiPage).filter_by(book_id=book_id).all()
+        if page.page_type != "summary"
+    }
+    if not known_pages:
+        return
+
+    alias_map = await find_link_aliases(
+        api_key, model, list(unresolved.values()), known_pages, summary_md
+    )
+
+    if not alias_map:
+        return
+
+    # Apply: update content + outgoing_links; record alias on the matched page
+    for unresolved_name, canonical_title in alias_map.items():
+        if not canonical_title:
+            continue
+        canonical_page = next(
+            (p for p in db.query(WikiPage).filter_by(book_id=book_id).all()
+             if p.title == canonical_title),
+            None,
+        )
+        if not canonical_page:
+            continue
+
+        _add_alias_to_page(canonical_page, unresolved_name)
+        unresolved_slug = _slugify(unresolved_name)
+
+        for v in new_versions:
+            dirty = False
+            if v.content_markdown and f"[[{unresolved_name}]]" in v.content_markdown:
+                v.content_markdown = v.content_markdown.replace(
+                    f"[[{unresolved_name}]]", f"[[{canonical_page.title}]]"
+                )
+                dirty = True
+            updated_links = []
+            for lk in (v.outgoing_links or []):
+                if lk["slug"] == unresolved_slug:
+                    updated_links.append({**lk, "slug": canonical_page.slug, "text": canonical_page.title})
+                    dirty = True
+                else:
+                    updated_links.append(lk)
+            if dirty:
+                v.outgoing_links = updated_links
+                flag_modified(v, "outgoing_links")
+
+    db.commit()
 
 
 def _get_previous_summaries(db: Session, book_id: int) -> list[dict]:
@@ -303,6 +404,20 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                     entities_in_chapter, summary_md = _apply_alias_map(
                         entities_in_chapter, summary_md, alias_map, entity_info
                     )
+                    # Persist resolved aliases on their canonical pages
+                    for alias_name, canonical_name in alias_map.items():
+                        if not canonical_name:
+                            continue
+                        canonical_slug = next(
+                            (s for s, info in entity_info.items() if info["name"] == canonical_name),
+                            None,
+                        )
+                        if canonical_slug:
+                            canonical_page = db.query(WikiPage).filter_by(
+                                book_id=book_id, slug=canonical_slug
+                            ).first()
+                            if canonical_page:
+                                _add_alias_to_page(canonical_page, alias_name)
             except Exception:
                 pass  # alias resolution is best-effort; never block chapter processing
 
@@ -313,12 +428,14 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
         # Store summary page version
         summary_page = _get_or_create_wiki_page(db, book_id, "summary", clean_title)
         links = resolve_links(summary_md)
-        db.add(WikiPageVersion(
+        summary_version = WikiPageVersion(
             page_id=summary_page.id,
             first_visible_chapter=story_chapter_idx,
             content_markdown=summary_md,
             outgoing_links=links,
-        ))
+        )
+        db.add(summary_version)
+        new_versions_this_chapter = [summary_version]
 
         # Track entity type/name for any new slugs seen
         for entity in entities_in_chapter:
@@ -375,13 +492,25 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                 if isinstance(new_content, Exception):
                     continue
                 links = resolve_links(new_content)
-                db.add(WikiPageVersion(
+                entity_version = WikiPageVersion(
                     page_id=task["page"].id,
                     first_visible_chapter=story_chapter_idx,
                     content_markdown=new_content,
                     outgoing_links=links,
-                ))
+                )
+                db.add(entity_version)
+                new_versions_this_chapter.append(entity_version)
             db.commit()
+
+        # 5. Post-process: resolve any remaining unresolved links via alias matching
+        book.generation_step = "Resolving link aliases…"
+        db.commit()
+        try:
+            await _resolve_unresolved_links(
+                db, book_id, new_versions_this_chapter, summary_md, api_key, model
+            )
+        except Exception:
+            pass  # best-effort; never block chapter processing
 
         new_progress = next_idx + 1
         book.generation_progress = new_progress

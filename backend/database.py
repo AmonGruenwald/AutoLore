@@ -87,6 +87,7 @@ class WikiPage(Base):
     page_type = Column(String, nullable=False)  # summary|character|place|event
     slug = Column(String, nullable=False)  # url-safe identifier
     title = Column(String, nullable=False)
+    aliases = Column(JSON, default=list)  # alternative names (titles, nicknames, etc.)
 
     book = relationship("Book", back_populates="wiki_pages")
     versions = relationship(
@@ -136,6 +137,7 @@ def _run_migrations():
         "ALTER TABLE books ADD COLUMN stop_chapter INTEGER",
         "ALTER TABLE chapters ADD COLUMN one_sentence_summary TEXT",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_wiki_page_book_title ON wiki_pages (book_id, title)",
+        "ALTER TABLE wiki_pages ADD COLUMN aliases TEXT",
         """CREATE TABLE IF NOT EXISTS wiki_blurbs (
             id INTEGER PRIMARY KEY,
             book_id INTEGER NOT NULL REFERENCES books(id),

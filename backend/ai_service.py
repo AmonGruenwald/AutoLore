@@ -399,6 +399,72 @@ canonical known name (string) or null if it is new:
     return {}
 
 
+async def find_link_aliases(
+    api_key: str,
+    model: str,
+    unresolved_names: list[str],
+    known_pages: dict[str, dict],
+    chapter_summary: str,
+) -> dict[str, str | None]:
+    """
+    Post-processing step: given link names that appear in generated content but
+    don't match any wiki page slug, determine if any are aliases for known pages.
+
+    known_pages: {slug: {"name": str, "type": str, "aliases": list[str]}}
+    Returns: {"Unresolved Name": "Canonical Page Title" | null, ...}
+    """
+    if not unresolved_names or not known_pages:
+        return {}
+
+    by_type: dict[str, list[str]] = {}
+    for info in known_pages.values():
+        by_type.setdefault(info["type"], []).append(info["name"])
+
+    known_lines = "\n".join(
+        f"{t.capitalize()}s: {', '.join(sorted(names))}"
+        for t, names in sorted(by_type.items())
+    )
+    unresolved_lines = "\n".join(f"- {name}" for name in unresolved_names)
+
+    prompt = f"""You are resolving wiki link aliases while building a book wiki.
+
+Chapter summary (use for context):
+{chapter_summary[:800]}
+
+Known wiki pages:
+{known_lines}
+
+These link names appear in the wiki content but don't match any page:
+{unresolved_lines}
+
+Task: For each unresolved link, determine if it clearly refers to a known page
+(e.g. a title, nickname, honorific, or alternate name for the same entity).
+
+Rules:
+- Only match when you are confident from the context.
+- If ambiguous, return null (treat as unknown reference).
+- A generic descriptor (e.g. "the guard") is NOT an alias unless context is clear.
+
+Respond with ONLY valid JSON mapping each unresolved name to the canonical page
+title (string) or null:
+{{"Name1": "Canonical Title", "Name2": null, ...}}"""
+
+    messages = [
+        {"role": "system", "content": "You are a precise JSON-only responder."},
+        {"role": "user", "content": prompt},
+    ]
+    raw = await _call_openrouter(api_key, model, messages, max_tokens=400)
+    raw = re.sub(r"^```[a-z]*\n?", "", raw.strip(), flags=re.MULTILINE)
+    raw = re.sub(r"\n?```$", "", raw.strip(), flags=re.MULTILINE)
+    try:
+        result = json.loads(raw.strip())
+        if isinstance(result, dict):
+            return {k: v for k, v in result.items() if isinstance(k, str)}
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return {}
+
+
 async def merge_wiki_pages(
     api_key: str,
     model: str,

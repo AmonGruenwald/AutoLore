@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import Book, WikiPage, WikiPageVersion, Series, Setting, WikiBlurb, get_db
 import ai_service
+from ai_service import _slugify
 
 router = APIRouter(prefix="/api/wiki", tags=["wiki"])
 
@@ -62,16 +63,16 @@ def get_wiki_page(book_id: int, slug: str, up_to_chapter: int, db: Session = Dep
 
     latest = max(visible_versions, key=lambda v: v.first_visible_chapter)
 
-    # Resolve outgoing links — only include those that are visible
+    # Resolve outgoing links — only include those that are visible.
+    # Also check aliases so links using alternate names still resolve.
     resolved_links = []
     for link in (latest.outgoing_links or []):
-        target = db.query(WikiPage).filter_by(book_id=book_id, slug=link["slug"]).first()
+        target = _find_page_by_slug_or_alias(db, book_id, link["slug"])
         if target:
             has_visible = any(v.first_visible_chapter <= up_to_chapter for v in target.versions)
-            if has_visible:
-                resolved_links.append({**link, "exists": True})
-            else:
-                resolved_links.append({**link, "exists": False})
+            # Normalise the link to point at the canonical slug
+            normalised = {**link, "slug": target.slug, "exists": has_visible}
+            resolved_links.append(normalised)
         else:
             resolved_links.append({**link, "exists": False})
 
@@ -83,6 +84,7 @@ def get_wiki_page(book_id: int, slug: str, up_to_chapter: int, db: Session = Dep
         "slug": page.slug,
         "title": page.title,
         "page_type": page.page_type,
+        "aliases": page.aliases or [],
         "content_markdown": latest.content_markdown,
         "first_visible_chapter": min(v.first_visible_chapter for v in visible_versions),
         "last_updated_chapter": latest.first_visible_chapter,
@@ -456,7 +458,27 @@ def _latest_content(page: WikiPage) -> str:
     return max(page.versions, key=lambda v: v.first_visible_chapter).content_markdown
 
 
+def _find_page_by_slug_or_alias(db: Session, book_id: int, slug: str) -> WikiPage | None:
+    """Look up a page by its canonical slug, or by an alias slug if not found directly."""
+    page = db.query(WikiPage).filter_by(book_id=book_id, slug=slug).first()
+    if page:
+        return page
+    # Check aliases: iterate pages and see if any alias slugifies to the target
+    for candidate in db.query(WikiPage).filter_by(book_id=book_id).all():
+        for alias_name in (candidate.aliases or []):
+            if _slugify(alias_name) == slug:
+                return candidate
+    return None
+
+
 def _find_backlinks(db: Session, book_id: int, target_slug: str, up_to_chapter: int) -> list[dict]:
+    # Build the full set of slugs that resolve to the target page (canonical + aliases)
+    target_page = db.query(WikiPage).filter_by(book_id=book_id, slug=target_slug).first()
+    target_slugs = {target_slug}
+    if target_page:
+        for alias_name in (target_page.aliases or []):
+            target_slugs.add(_slugify(alias_name))
+
     all_pages = db.query(WikiPage).filter_by(book_id=book_id).all()
     backlinks = []
     for page in all_pages:
@@ -465,7 +487,7 @@ def _find_backlinks(db: Session, book_id: int, target_slug: str, up_to_chapter: 
             continue
         latest = max(visible_versions, key=lambda v: v.first_visible_chapter)
         for link in (latest.outgoing_links or []):
-            if link["slug"] == target_slug:
+            if link["slug"] in target_slugs:
                 backlinks.append({
                     "slug": page.slug,
                     "title": page.title,
