@@ -249,7 +249,7 @@ def _parse_summary_response(raw: str, chapter_number: int) -> dict:
                     entities.append({
                         "type": e["type"].lower(),
                         "name": e["name"],
-                        "slug": _slugify(e["type"] + "-" + e["name"]),
+                        "slug": _slugify(e["name"]),
                         "significance": e.get("significance", "major").lower(),
                     })
         except json.JSONDecodeError:
