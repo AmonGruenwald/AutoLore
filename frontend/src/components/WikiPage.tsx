@@ -81,7 +81,7 @@ export default function WikiPage({ page, onNavigate, visibleSlugs, sameTypePages
   }
 
   return (
-    <article className="max-w-2xl">
+    <article className="max-w-2xl lg:max-w-3xl">
       {/* Header */}
       <div className="mb-7">
         <div className="flex items-center gap-2 mb-3">
