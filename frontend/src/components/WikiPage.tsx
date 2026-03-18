@@ -57,7 +57,7 @@ export default function WikiPage({ page, onNavigate, visibleSlugs, sameTypePages
         : (page.outgoing_links.find(l => l.slug === slug)?.exists ?? false)
       return exists
         ? `[${name}](wiki:${slug})`
-        : `[${name}](wiki-missing:${slug})`
+        : name
     }
   )
 
@@ -233,9 +233,6 @@ export default function WikiPage({ page, onNavigate, visibleSlugs, sameTypePages
                       {children}
                     </button>
                   )
-                }
-                if (href?.startsWith('wiki-missing:')) {
-                  return <span className="wiki-link-missing" title="Not yet revealed">{children}</span>
                 }
                 return <a href={href} className="wiki-link">{children}</a>
               },
