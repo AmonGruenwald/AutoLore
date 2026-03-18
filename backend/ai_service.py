@@ -41,7 +41,15 @@ async def _call_openrouter(
             json=body,
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            err = data.get("error") or data
+            raise ValueError(f"API returned no choices: {err}")
+        content = choices[0]["message"]["content"]
+        if content is None:
+            raise ValueError("API returned null content")
+        return content
 
 
 
