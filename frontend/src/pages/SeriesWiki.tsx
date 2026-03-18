@@ -166,7 +166,7 @@ export default function SeriesWiki() {
           )}
         </aside>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8">
+        <main className="flex-1 overflow-y-auto px-6 py-6 md:px-10 md:py-8">
           {loadingPage ? (
             <div className="flex justify-center pt-16"><Loader2 size={24} className="animate-spin" /></div>
           ) : currentPage ? (
