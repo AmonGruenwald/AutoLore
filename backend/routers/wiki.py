@@ -210,7 +210,7 @@ async def update_wiki_page(
     The version visible at edit_chapter is updated and later versions are
     AI-propagated to incorporate the user's changes.
     """
-    from ai_service import propagate_wiki_edit
+    from ai_service import propagate_wiki_edit, _slugify
     from wiki_builder import resolve_links
 
     page = db.query(WikiPage).filter_by(book_id=book_id, slug=slug).first()
@@ -226,16 +226,37 @@ async def update_wiki_page(
         raise HTTPException(404, "No version visible at this chapter")
 
     target = visible[-1]
+    target_chapter = target.first_visible_chapter  # save before potential expiry
     old_content = target.content_markdown
+    old_title = page.title
+    old_slug = page.slug
 
     # Apply user's edit to the target version
+    new_links = resolve_links(body.content)
     target.content_markdown = body.content
-    target.outgoing_links = resolve_links(body.content)
+    target.outgoing_links = new_links
     page.title = body.title
+
+    # If the title changed, update the slug and fix all references in other pages
+    new_slug = _slugify(page.page_type + "-" + body.title)
+    if new_slug != old_slug:
+        page.slug = new_slug
+        type_cap = page.page_type.capitalize()
+        old_link_text = f"[[{type_cap}:{old_title}]]"
+        new_link_text = f"[[{type_cap}:{body.title}]]"
+        for other_page in db.query(WikiPage).filter(
+            WikiPage.book_id == book_id, WikiPage.id != page.id
+        ).all():
+            for version in other_page.versions:
+                if version.content_markdown and old_link_text in version.content_markdown:
+                    version.content_markdown = version.content_markdown.replace(
+                        old_link_text, new_link_text
+                    )
+                    version.outgoing_links = resolve_links(version.content_markdown)
 
     # Future versions — propagate the user's changes using AI
     future_versions = sorted(
-        [v for v in page.versions if v.first_visible_chapter > target.first_visible_chapter],
+        [v for v in page.versions if v.first_visible_chapter > target_chapter],
         key=lambda v: v.first_visible_chapter,
     )
 
@@ -246,26 +267,29 @@ async def update_wiki_page(
         model   = model_row.value if model_row else "mistralai/mistral-7b-instruct"
 
         if api_key:
-            current_old = old_content
-            current_new = body.content
-            for fv in future_versions:
-                result = await propagate_wiki_edit(
-                    api_key, model,
-                    page.page_type,
-                    current_old, current_new,
-                    fv.content_markdown,
-                )
-                fv.content_markdown = result["content"]
-                fv.outgoing_links = resolve_links(result["content"])
-                # Cascade: next iteration uses this updated version as the base
-                current_old = fv.content_markdown
-                current_new = result["content"]
+            try:
+                current_old = old_content
+                current_new = body.content
+                for fv in future_versions:
+                    old_fv_content = fv.content_markdown
+                    result = await propagate_wiki_edit(
+                        api_key, model,
+                        page.page_type,
+                        current_old, current_new,
+                        fv.content_markdown,
+                    )
+                    fv.content_markdown = result["content"]
+                    fv.outgoing_links = resolve_links(result["content"])
+                    # Cascade: next iteration diffs old → new of this version
+                    current_old = old_fv_content
+                    current_new = result["content"]
+            except Exception:
+                pass  # AI propagation failed; the target edit is still committed below
 
     db.commit()
     db.refresh(page)
 
     all_versions = sorted(page.versions, key=lambda v: v.first_visible_chapter)
-    latest = all_versions[-1]
     fvc = all_versions[0].first_visible_chapter
 
     return {
@@ -273,11 +297,11 @@ async def update_wiki_page(
         "slug": page.slug,
         "title": page.title,
         "page_type": page.page_type,
-        "content_markdown": latest.content_markdown,
+        "content_markdown": body.content,
         "first_visible_chapter": fvc,
-        "last_updated_chapter": latest.first_visible_chapter,
-        "outgoing_links": latest.outgoing_links or [],
-        "backlinks": _find_backlinks(db, book_id, slug, body.edit_chapter),
+        "last_updated_chapter": target_chapter,
+        "outgoing_links": new_links,
+        "backlinks": _find_backlinks(db, book_id, page.slug, body.edit_chapter),
         "version_history": [{"chapter": v.first_visible_chapter} for v in all_versions],
     }
 
