@@ -53,8 +53,15 @@ def list_wiki_pages(book_id: int, up_to_chapter: int, db: Session = Depends(get_
 def get_wiki_page(book_id: int, slug: str, up_to_chapter: int, db: Session = Depends(get_db)):
     """
     Returns the latest version of a wiki page visible at up_to_chapter.
+    Also resolves old slugs stored as aliases (e.g. after a merge).
     """
     page = db.query(WikiPage).filter_by(book_id=book_id, slug=slug).first()
+    if not page:
+        # Fall back to alias lookup so old links still resolve
+        for candidate in db.query(WikiPage).filter_by(book_id=book_id).all():
+            if slug in (candidate.aliases or []):
+                page = candidate
+                break
     if not page:
         raise HTTPException(404, "Wiki page not found")
 
@@ -320,6 +327,16 @@ async def merge_wiki_page(
             if dirty:
                 flag_modified(v, "outgoing_links")
 
+    # Store the absorbed page's slug as an alias so old links still resolve.
+    # Also store page_a's old slug if the title (and thus slug) changed.
+    aliases = list(page_a.aliases or [])
+    if page_b.slug not in aliases:
+        aliases.append(page_b.slug)
+    if new_slug != old_slug and old_slug not in aliases:
+        aliases.append(old_slug)
+    page_a.aliases = aliases
+    flag_modified(page_a, "aliases")
+
     # Delete the absorbed page
     db.delete(page_b)
     db.commit()
@@ -338,6 +355,70 @@ async def merge_wiki_page(
         "backlinks": [],
         "version_history": [{"chapter": fvc}],
     }
+
+
+class RetypePageBody(BaseModel):
+    page_type: str  # character|place|event
+
+
+@router.post("/{book_id}/page/{slug}/retype")
+def retype_wiki_page(
+    book_id: int,
+    slug: str,
+    body: RetypePageBody,
+    db: Session = Depends(get_db),
+):
+    """
+    Change the type of a wiki page (e.g. character → place).
+    Updates all [[OldType:Title]] references in other pages to [[NewType:Title]].
+    """
+    from wiki_builder import resolve_links
+    from sqlalchemy.orm.attributes import flag_modified
+
+    VALID_TYPES = {"character", "place", "event"}
+    if body.page_type not in VALID_TYPES:
+        raise HTTPException(400, f"page_type must be one of: {', '.join(sorted(VALID_TYPES))}")
+
+    page = db.query(WikiPage).filter_by(book_id=book_id, slug=slug).first()
+    if not page:
+        raise HTTPException(404, "Wiki page not found")
+    if page.page_type == "summary":
+        raise HTTPException(400, "Cannot change the type of chapter summaries")
+    if page.page_type == body.page_type:
+        return {"id": page.id, "slug": page.slug, "title": page.title, "page_type": page.page_type}
+
+    old_type = page.page_type
+    new_type = body.page_type
+    old_link_text = f"[[{old_type.capitalize()}:{page.title}]]"
+    new_link_text = f"[[{new_type.capitalize()}:{page.title}]]"
+
+    page.page_type = new_type
+
+    # Rewrite [[OldType:Title]] → [[NewType:Title]] across all other versions in the book
+    other_versions = (
+        db.query(WikiPageVersion)
+        .join(WikiPage, WikiPageVersion.page_id == WikiPage.id)
+        .filter(WikiPage.book_id == book_id, WikiPage.id != page.id)
+        .all()
+    )
+    for v in other_versions:
+        dirty = False
+        if v.content_markdown and old_link_text in v.content_markdown:
+            v.content_markdown = v.content_markdown.replace(old_link_text, new_link_text)
+            v.outgoing_links = resolve_links(v.content_markdown)
+            dirty = True
+        elif any(lk.get("slug") == slug and lk.get("page_type") == old_type for lk in (v.outgoing_links or [])):
+            v.outgoing_links = [
+                {**lk, "page_type": new_type} if lk.get("slug") == slug else lk
+                for lk in v.outgoing_links
+            ]
+            dirty = True
+        if dirty:
+            flag_modified(v, "outgoing_links")
+
+    db.commit()
+    db.refresh(page)
+    return {"id": page.id, "slug": page.slug, "title": page.title, "page_type": page.page_type}
 
 
 class UpdatePageBody(BaseModel):

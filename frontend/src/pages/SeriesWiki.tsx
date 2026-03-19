@@ -194,6 +194,7 @@ export default function SeriesWiki() {
               onDelete={() => {}}
               onMerge={() => {}}
               onEdit={handleEditPage}
+              onRetype={() => Promise.resolve()}
               onRegenerate={(content) => setCurrentPage(prev => prev ? { ...prev, content_markdown: content } : null)}
               merging={false}
             />

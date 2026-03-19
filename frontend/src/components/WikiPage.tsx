@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Link2, Trash2, GitMerge, X, Loader2, Pencil, Check, RefreshCw } from 'lucide-react'
+import { Link2, Trash2, GitMerge, X, Loader2, Pencil, Check, RefreshCw, ArrowRightLeft } from 'lucide-react'
 import type { WikiPageContent, WikiPageSummary } from '../lib/api'
 import { regenerateWikiPage } from '../lib/api'
 
@@ -15,6 +15,7 @@ interface Props {
   onDelete: () => void
   onMerge: (targetSlug: string) => void
   onEdit: (title: string, content: string) => Promise<void>
+  onRetype: (newType: string) => Promise<void>
   onRegenerate: (content: string) => void
   merging: boolean
 }
@@ -33,8 +34,12 @@ const TYPE_COLOR: Record<string, string> = {
   event:     'text-orange-700 bg-orange-50 border-orange-200',
 }
 
-export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibleSlugs, sameTypePages, onDelete, onMerge, onEdit, onRegenerate, merging }: Props) {
+const ENTITY_TYPES = ['character', 'place', 'event'] as const
+
+export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibleSlugs, sameTypePages, onDelete, onMerge, onEdit, onRetype, onRegenerate, merging }: Props) {
   const [showMergePicker, setShowMergePicker] = useState(false)
+  const [showRetypePicker, setShowRetypePicker] = useState(false)
+  const [retyping, setRetyping] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -58,6 +63,8 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
     setRegenerateProgress(null)
     setStreamingContent(null)
     setRegenerateError(null)
+    setShowRetypePicker(false)
+    setRetyping(false)
   }
   const processedMarkdown = page.content_markdown.replace(
     /\[\[([^\]]+)\]\]/g,
@@ -119,7 +126,17 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
     }
   }
 
-  const busy = editing || regenerating || merging
+  async function handleRetype(newType: string) {
+    setShowRetypePicker(false)
+    setRetyping(true)
+    try {
+      await onRetype(newType)
+    } finally {
+      setRetyping(false)
+    }
+  }
+
+  const busy = editing || regenerating || merging || retyping
 
   return (
     <article className="max-w-3xl mx-auto">
@@ -197,6 +214,43 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
                             className="w-full text-left px-3 py-2 text-sm hover:bg-parchment-100 transition-colors truncate"
                           >
                             {p.title}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Change type */}
+              {page.page_type !== 'summary' && (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowRetypePicker(v => !v)}
+                    title="Change entity type"
+                    disabled={retyping}
+                    className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg border border-parchment-300 text-ink-muted hover:border-parchment-400 hover:text-ink transition-colors disabled:opacity-40"
+                  >
+                    {retyping
+                      ? <Loader2 size={11} className="animate-spin" />
+                      : <ArrowRightLeft size={11} />}
+                    {retyping ? 'Moving…' : 'Move to'}
+                  </button>
+
+                  {showRetypePicker && !retyping && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setShowRetypePicker(false)} />
+                      <div className="absolute right-0 top-full mt-1 z-20 w-40 bg-white border border-parchment-300 rounded-xl shadow-lg py-1 overflow-hidden">
+                        <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider font-semibold text-ink-muted">
+                          Move to…
+                        </p>
+                        {ENTITY_TYPES.filter(t => t !== page.page_type).map(t => (
+                          <button
+                            key={t}
+                            onClick={() => handleRetype(t)}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-parchment-100 transition-colors capitalize"
+                          >
+                            {TYPE_LABEL[t]}
                           </button>
                         ))}
                       </div>
