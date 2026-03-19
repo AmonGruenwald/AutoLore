@@ -283,8 +283,10 @@ async def merge_wiki_page(
     ))
     page_a.title = merged["title"]
 
-    # Keep slug in sync with title (same invariant as update_wiki_page)
-    new_slug = _slugify(page_a.page_type + "-" + merged["title"])
+    # Keep slug in sync with title — same convention as _get_or_create_wiki_page
+    # (no type prefix), so entity_info lookups and future _get_or_create calls
+    # can find this page by _slugify(title) without a mismatch.
+    new_slug = _slugify(merged["title"])
     if new_slug != old_slug:
         page_a.slug = new_slug
         type_cap = page_a.page_type.capitalize()
