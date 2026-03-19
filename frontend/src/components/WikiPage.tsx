@@ -61,7 +61,9 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
   }
   const processedMarkdown = page.content_markdown.replace(
     /\[\[([^\]]+)\]\]/g,
-    (_, name) => {
+    (_, raw) => {
+      const colonIdx = raw.indexOf(':')
+      const name = colonIdx !== -1 ? raw.slice(colonIdx + 1).trim() : raw.trim()
       const slug = slugify(name)
       const exists = visibleSlugs
         ? visibleSlugs.has(slug)
