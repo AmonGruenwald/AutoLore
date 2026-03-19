@@ -19,7 +19,7 @@ async def _get_settings(db: Session) -> tuple[str, str]:
     model = db.query(Setting).filter_by(key="openrouter_model").first()
     if not api_key or not api_key.value:
         raise ValueError("OpenRouter API key not configured")
-    return api_key.value, (model.value if model else "mistralai/mistral-7b-instruct")
+    return api_key.value, (model.value if model else "deepseek/deepseek-v3.2")
 
 
 def resolve_links(markdown: str) -> list[dict]:
