@@ -154,6 +154,7 @@ async def regenerate_wiki_page(
     page_type = page.page_type
 
     async def event_stream():
+        import ai_service
         from wiki_builder import resolve_links
 
         total = len(relevant_summaries)
