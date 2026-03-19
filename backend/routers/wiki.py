@@ -1,8 +1,10 @@
+import json as _json
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from database import Book, WikiPage, WikiPageVersion, Series, Setting, WikiBlurb, get_db
-import ai_service
+from database import Book, WikiPage, WikiPageVersion, Series, Setting, get_db, SessionLocal, WikiBlurb
+
 
 router = APIRouter(prefix="/api/wiki", tags=["wiki"])
 
@@ -103,6 +105,113 @@ def delete_wiki_page(book_id: int, slug: str, db: Session = Depends(get_db)):
     db.delete(page)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/{book_id}/page/{slug}/regenerate")
+async def regenerate_wiki_page(
+    book_id: int,
+    slug: str,
+    up_to_chapter: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Re-derive an entity wiki page by re-processing all chapter summaries that
+    mention it (up to up_to_chapter), feeding them one by one and continuously
+    updating the same description.  Streams SSE events with live content updates.
+    """
+    page = db.query(WikiPage).filter_by(book_id=book_id, slug=slug).first()
+    if not page:
+        raise HTTPException(404, "Wiki page not found")
+    if page.page_type == "summary":
+        raise HTTPException(400, "Cannot regenerate chapter summaries")
+
+    api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
+    model_row = db.query(Setting).filter_by(key="openrouter_model").first()
+    api_key = api_key_row.value if api_key_row else ""
+    model = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+
+    if not api_key:
+        raise HTTPException(400, "OpenRouter API key not configured")
+
+    # Find chapter summaries (up to up_to_chapter) that mention this entity
+    summary_pages = db.query(WikiPage).filter_by(book_id=book_id, page_type="summary").all()
+    relevant_summaries = []
+    for sp in summary_pages:
+        visible = [v for v in sp.versions if v.first_visible_chapter <= up_to_chapter]
+        if not visible:
+            continue
+        latest = max(visible, key=lambda v: v.first_visible_chapter)
+        if any(link["slug"] == slug for link in (latest.outgoing_links or [])):
+            relevant_summaries.append({
+                "chapter": latest.first_visible_chapter,
+                "content": latest.content_markdown,
+            })
+    relevant_summaries.sort(key=lambda s: s["chapter"])
+
+    # Capture DB-needed values before entering the async generator
+    page_id = page.id
+    page_title = page.title
+    page_type = page.page_type
+
+    async def event_stream():
+        from wiki_builder import resolve_links
+
+        total = len(relevant_summaries)
+        if total == 0:
+            yield f"data: {_json.dumps({'type': 'error', 'message': 'Entity not mentioned in any chapter up to this point'})}\n\n"
+            return
+
+        current_content = ""
+        chapter_results: list[tuple[int, str]] = []
+
+        for i, chapter_summary in enumerate(relevant_summaries):
+            try:
+                new_content = await ai_service.generate_entity_page(
+                    api_key, model,
+                    page_title, page_type,
+                    chapter_summary["content"],
+                    chapter_summary["chapter"],
+                    current_content,
+                )
+                current_content = new_content
+                chapter_results.append((chapter_summary["chapter"], current_content))
+                yield f"data: {_json.dumps({'type': 'update', 'content': current_content, 'chapter': chapter_summary['chapter'], 'progress': i + 1, 'total': total})}\n\n"
+            except Exception as e:
+                yield f"data: {_json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                return
+
+        # Persist results: replace versions (up to up_to_chapter) with one version per
+        # processed chapter so the chapter slider still shows the entity evolving.
+        try:
+            save_db = SessionLocal()
+            try:
+                wiki_page = save_db.query(WikiPage).filter_by(id=page_id).first()
+                if wiki_page:
+                    for v in list(wiki_page.versions):
+                        if v.first_visible_chapter <= up_to_chapter:
+                            save_db.delete(v)
+                    save_db.flush()
+                    for chapter_num, content in chapter_results:
+                        links = resolve_links(content)
+                        save_db.add(WikiPageVersion(
+                            page_id=page_id,
+                            first_visible_chapter=chapter_num,
+                            content_markdown=content,
+                            outgoing_links=links,
+                        ))
+                    save_db.commit()
+            finally:
+                save_db.close()
+        except Exception:
+            pass  # don't fail the stream if save fails
+
+        yield f"data: {_json.dumps({'type': 'done', 'content': current_content})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 class MergePageBody(BaseModel):

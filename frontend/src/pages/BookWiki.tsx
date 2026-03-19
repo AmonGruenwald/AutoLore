@@ -419,6 +419,8 @@ export default function BookWiki() {
               {selectedSlug && !pageNotYetVisible && !loadingPage && currentPage && (
                 <WikiPageComponent
                   page={currentPage}
+                  bookId={id}
+                  upToChapter={effectiveChapter}
                   onNavigate={setSelectedSlug}
                   visibleSlugs={visibleSlugSet}
                   sameTypePages={pages ? [
@@ -430,6 +432,7 @@ export default function BookWiki() {
                   onDelete={handleDeletePage}
                   onMerge={handleMergePage}
                   onEdit={handleEditPage}
+                  onRegenerate={(content) => setCurrentPage(prev => prev ? { ...prev, content_markdown: content } : null)}
                   merging={merging}
                 />
               )}

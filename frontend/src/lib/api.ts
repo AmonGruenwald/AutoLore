@@ -90,6 +90,47 @@ export const updateWikiPage = (bookId: number, slug: string, title: string, cont
     body: JSON.stringify({ title, content, edit_chapter: editChapter }),
   })
 
+export async function regenerateWikiPage(
+  bookId: number,
+  slug: string,
+  upToChapter: number,
+  onUpdate: (content: string, progress: number, total: number) => void,
+): Promise<string> {
+  const resp = await fetch(`${BASE}/wiki/${bookId}/page/${slug}/regenerate?up_to_chapter=${upToChapter}`, {
+    method: 'POST',
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+    throw new Error(err.detail || `HTTP ${resp.status}`)
+  }
+
+  const reader = resp.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finalContent = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const data = JSON.parse(line.slice(6))
+      if (data.type === 'update') {
+        finalContent = data.content
+        onUpdate(data.content, data.progress, data.total)
+      } else if (data.type === 'done') {
+        finalContent = data.content
+      } else if (data.type === 'error') {
+        throw new Error(data.message)
+      }
+    }
+  }
+  return finalContent
+}
+
 export const getSeriesWikiPages = (seriesId: number, upToChapter: number) =>
   request<WikiPageList>(`/wiki/series/${seriesId}/pages?up_to_global_chapter=${upToChapter}`)
 
