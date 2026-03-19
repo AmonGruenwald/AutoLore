@@ -96,9 +96,27 @@ export default function BookWiki() {
     ])
   }, [pages])
 
-  // Fetch the selected page — skip if slug isn't visible at this chapter
+  // Map from alias slug → canonical slug for merged pages
+  const aliasToCanonical = useMemo(() => {
+    const map = new Map<string, string>()
+    if (!pages) return map
+    for (const p of [...pages.summaries, ...pages.characters, ...pages.places, ...pages.events]) {
+      for (const alias of p.aliases ?? []) {
+        map.set(alias, p.slug)
+      }
+    }
+    return map
+  }, [pages])
+
+  // Fetch the selected page — skip if slug isn't visible at this chapter.
+  // If the slug is an alias (from a merge), resolve to the canonical slug first.
   useEffect(() => {
     if (!selectedSlug) return
+    const canonicalSlug = aliasToCanonical.get(selectedSlug) ?? selectedSlug
+    if (canonicalSlug !== selectedSlug) {
+      setSelectedSlug(canonicalSlug)
+      return
+    }
     if (pages !== null && !visibleSlugSet.has(selectedSlug)) {
       setCurrentPage(null)
       return
@@ -108,7 +126,7 @@ export default function BookWiki() {
       .then(setCurrentPage)
       .catch(() => setCurrentPage(null))
       .finally(() => setLoadingPage(false))
-  }, [id, selectedSlug, effectiveChapter, visibleSlugSet, pages])
+  }, [id, selectedSlug, effectiveChapter, visibleSlugSet, aliasToCanonical, pages])
 
   async function handleContinue() {
     if (!book) return
@@ -153,9 +171,9 @@ export default function BookWiki() {
     }
   }
 
-  async function handleEditPage(title: string, content: string) {
+  async function handleEditPage(title: string, content: string, aliases: string[]) {
     if (!currentPage) return
-    const updated = await updateWikiPage(id, currentPage.slug, title, content, effectiveChapter)
+    const updated = await updateWikiPage(id, currentPage.slug, title, content, effectiveChapter, aliases)
     setCurrentPage(updated)
     if (updated.slug !== currentPage.slug) {
       setSelectedSlug(updated.slug)
@@ -430,6 +448,7 @@ export default function BookWiki() {
                   upToChapter={effectiveChapter}
                   onNavigate={setSelectedSlug}
                   visibleSlugs={visibleSlugSet}
+                  aliasToCanonical={aliasToCanonical}
                   sameTypePages={pages ? [
                     ...pages.summaries,
                     ...pages.characters,

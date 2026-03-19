@@ -35,6 +35,7 @@ def list_wiki_pages(book_id: int, up_to_chapter: int, db: Session = Depends(get_
             "page_type": page.page_type,
             "first_visible_chapter": min(v.first_visible_chapter for v in visible_versions),
             "last_updated_chapter": max(v.first_visible_chapter for v in visible_versions),
+            "aliases": list(page.aliases or []),
         }
 
         key = page.page_type + "s" if page.page_type != "summary" else "summaries"
@@ -92,6 +93,7 @@ def get_wiki_page(book_id: int, slug: str, up_to_chapter: int, db: Session = Dep
         "slug": page.slug,
         "title": page.title,
         "page_type": page.page_type,
+        "aliases": list(page.aliases or []),
         "content_markdown": latest.content_markdown,
         "first_visible_chapter": min(v.first_visible_chapter for v in visible_versions),
         "last_updated_chapter": latest.first_visible_chapter,
@@ -348,6 +350,7 @@ async def merge_wiki_page(
         "slug": page_a.slug,
         "title": page_a.title,
         "page_type": page_a.page_type,
+        "aliases": list(page_a.aliases or []),
         "content_markdown": merged["content"],
         "first_visible_chapter": fvc,
         "last_updated_chapter": fvc,
@@ -425,6 +428,7 @@ class UpdatePageBody(BaseModel):
     title: str
     content: str
     edit_chapter: int  # the chapter the user is viewing (determines which version is being edited)
+    aliases: list[str] | None = None  # if provided, replaces the page's alias list
 
 
 @router.put("/{book_id}/page/{slug}")
@@ -543,6 +547,11 @@ async def update_wiki_page(
             except Exception:
                 pass  # AI propagation failed; the target edit is still committed below
 
+    # Update aliases if the caller supplied a new list
+    if body.aliases is not None:
+        page.aliases = body.aliases
+        flag_modified(page, "aliases")
+
     db.commit()
     db.refresh(page)
 
@@ -554,6 +563,7 @@ async def update_wiki_page(
         "slug": page.slug,
         "title": page.title,
         "page_type": page.page_type,
+        "aliases": list(page.aliases or []),
         "content_markdown": body.content,
         "first_visible_chapter": fvc,
         "last_updated_chapter": target_chapter,

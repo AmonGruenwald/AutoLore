@@ -84,10 +84,10 @@ export const mergeWikiPages = (bookId: number, slug: string, mergeWithSlug: stri
     body: JSON.stringify({ merge_with_slug: mergeWithSlug }),
   })
 
-export const updateWikiPage = (bookId: number, slug: string, title: string, content: string, editChapter: number) =>
+export const updateWikiPage = (bookId: number, slug: string, title: string, content: string, editChapter: number, aliases?: string[]) =>
   request<WikiPageContent>(`/wiki/${bookId}/page/${slug}`, {
     method: 'PUT',
-    body: JSON.stringify({ title, content, edit_chapter: editChapter }),
+    body: JSON.stringify({ title, content, edit_chapter: editChapter, aliases }),
   })
 
 export const retypeWikiPage = (bookId: number, slug: string, pageType: string) =>
@@ -227,6 +227,7 @@ export interface WikiPageSummary {
   page_type: string
   first_visible_chapter: number
   last_updated_chapter: number
+  aliases?: string[]
   book_id?: number
   book_title?: string
 }
@@ -250,6 +251,7 @@ export interface WikiPageContent {
   slug: string
   title: string
   page_type: string
+  aliases: string[]
   content_markdown: string
   first_visible_chapter: number
   last_updated_chapter: number
