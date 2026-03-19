@@ -121,8 +121,9 @@ async def merge_wiki_page(
     The source page (slug) is updated with the combined content; the
     target page (merge_with_slug) is deleted.  Returns the updated page.
     """
-    from ai_service import merge_wiki_pages as ai_merge
+    from ai_service import merge_wiki_pages as ai_merge, _slugify
     from wiki_builder import resolve_links
+    from sqlalchemy.orm.attributes import flag_modified
 
     if slug == body.merge_with_slug:
         raise HTTPException(400, "Cannot merge a page with itself")
@@ -148,16 +149,15 @@ async def merge_wiki_page(
         (min(v.first_visible_chapter for v in page_a.versions) if page_a.versions else 1),
         (min(v.first_visible_chapter for v in page_b.versions) if page_b.versions else 1),
     )
-    lvc = max(
-        (max(v.first_visible_chapter for v in page_a.versions) if page_a.versions else 1),
-        (max(v.first_visible_chapter for v in page_b.versions) if page_b.versions else 1),
-    )
 
     merged = await ai_merge(
         api_key, model,
         page_a.title, page_a.page_type, content_a,
         page_b.title, content_b,
     )
+
+    old_slug = page_a.slug
+    old_title = page_a.title
 
     # Replace all versions of page_a with a single merged version
     for v in list(page_a.versions):
@@ -173,6 +173,36 @@ async def merge_wiki_page(
     ))
     page_a.title = merged["title"]
 
+    # Keep slug in sync with title (same invariant as update_wiki_page)
+    new_slug = _slugify(page_a.page_type + "-" + merged["title"])
+    if new_slug != old_slug:
+        page_a.slug = new_slug
+        type_cap = page_a.page_type.capitalize()
+        old_link_text = f"[[{type_cap}:{old_title}]]"
+        new_link_text = f"[[{type_cap}:{merged['title']}]]"
+
+        other_versions = (
+            db.query(WikiPageVersion)
+            .join(WikiPage, WikiPageVersion.page_id == WikiPage.id)
+            .filter(WikiPage.book_id == book_id, WikiPage.id != page_a.id, WikiPage.id != page_b.id)
+            .all()
+        )
+        for v in other_versions:
+            dirty = False
+            if v.content_markdown and old_link_text in v.content_markdown:
+                v.content_markdown = v.content_markdown.replace(old_link_text, new_link_text)
+                v.outgoing_links = resolve_links(v.content_markdown)
+                dirty = True
+            elif any(lk.get("slug") == old_slug for lk in (v.outgoing_links or [])):
+                v.outgoing_links = [
+                    {**lk, "slug": new_slug, "text": merged["title"]}
+                    if lk.get("slug") == old_slug else lk
+                    for lk in v.outgoing_links
+                ]
+                dirty = True
+            if dirty:
+                flag_modified(v, "outgoing_links")
+
     # Delete the absorbed page
     db.delete(page_b)
     db.commit()
@@ -180,12 +210,13 @@ async def merge_wiki_page(
     # Return full page detail so the frontend can display it immediately
     db.refresh(page_a)
     return {
+        "id": page_a.id,
         "slug": page_a.slug,
         "title": page_a.title,
         "page_type": page_a.page_type,
         "content_markdown": merged["content"],
         "first_visible_chapter": fvc,
-        "last_updated_chapter": lvc,
+        "last_updated_chapter": fvc,
         "outgoing_links": links,
         "backlinks": [],
         "version_history": [{"chapter": fvc}],

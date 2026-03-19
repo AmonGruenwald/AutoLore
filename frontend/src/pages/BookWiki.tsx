@@ -28,6 +28,7 @@ export default function BookWiki() {
   const [continuing, setContinuing] = useState(false)
   const [stopChapterInput, setStopChapterInput] = useState<string>('')
   const [merging, setMerging] = useState(false)
+  const [mergeError, setMergeError] = useState('')
   const [askOpen, setAskOpen] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
 
@@ -137,10 +138,16 @@ export default function BookWiki() {
   async function handleMergePage(targetSlug: string) {
     if (!currentPage) return
     setMerging(true)
+    setMergeError('')
     try {
       const merged = await mergeWikiPages(id, currentPage.slug, targetSlug)
       setCurrentPage(merged)
+      if (merged.slug !== currentPage.slug) {
+        setSelectedSlug(merged.slug)
+      }
       loadPages()
+    } catch (e) {
+      setMergeError(e instanceof Error ? e.message : 'Merge failed')
     } finally {
       setMerging(false)
     }
@@ -398,6 +405,13 @@ export default function BookWiki() {
               {selectedSlug && !pageNotYetVisible && loadingPage && (
                 <div className="flex justify-center pt-16">
                   <Loader2 size={20} className="animate-spin text-ink-muted" />
+                </div>
+              )}
+
+              {/* Merge error */}
+              {mergeError && (
+                <div className="mb-4 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+                  Merge failed: {mergeError}
                 </div>
               )}
 
