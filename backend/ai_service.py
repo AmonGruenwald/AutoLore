@@ -324,6 +324,8 @@ Instructions:
 - Use [[Name]] syntax for cross-references to characters, places, and events.
 - Use markdown formatting (## headings, bullet lists where appropriate).
 - Do not include a top-level title.
+- If "{entity_name}" is not mentioned anywhere in the chapter summary, output the existing
+  page exactly as-is with no modifications.
 - Output the complete updated page."""
     else:
         prompt = f"""Create a wiki page for {entity_type.upper()}: "{entity_name}".
@@ -337,7 +339,9 @@ Extract ONLY information about "{entity_name}" and write a wiki page covering: {
 - Only include details explicitly stated in the summary above that concern "{entity_name}".
 - Use [[Name]] syntax for cross-references to characters, places, and events.
 - Use markdown formatting (## headings, bullet lists where appropriate).
-- Do not include a top-level title."""
+- Do not include a top-level title.
+- IMPORTANT: If "{entity_name}" is not mentioned anywhere in the chapter summary, output
+  exactly the single word: SKIP"""
 
     messages = [
         {"role": "system", "content": GROUNDING_SYSTEM},

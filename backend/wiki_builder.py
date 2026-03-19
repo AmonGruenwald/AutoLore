@@ -385,6 +385,10 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             for task, new_content in zip(entities_to_update, results):
                 if isinstance(new_content, Exception):
                     continue
+                # AI signals the entity was absent from this chapter's summary —
+                # skip rather than storing a refusal/error message as page content.
+                if new_content.strip().upper() == "SKIP" or not new_content.strip():
+                    continue
                 links = resolve_links(new_content)
                 db.add(WikiPageVersion(
                     page_id=task["page"].id,

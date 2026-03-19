@@ -174,6 +174,11 @@ async def regenerate_wiki_page(
                     chapter_summary["chapter"],
                     current_content,
                 )
+                # SKIP sentinel means entity absent from this chapter — keep existing content
+                if new_content.strip().upper() == "SKIP" or not new_content.strip():
+                    chapter_results.append((chapter_summary["chapter"], current_content))
+                    yield f"data: {_json.dumps({'type': 'update', 'content': current_content, 'chapter': chapter_summary['chapter'], 'progress': i + 1, 'total': total})}\n\n"
+                    continue
                 current_content = new_content
                 chapter_results.append((chapter_summary["chapter"], current_content))
                 yield f"data: {_json.dumps({'type': 'update', 'content': current_content, 'chapter': chapter_summary['chapter'], 'progress': i + 1, 'total': total})}\n\n"
