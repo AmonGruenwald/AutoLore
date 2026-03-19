@@ -169,9 +169,20 @@ export default function SeriesWiki() {
         <main className="flex-1 overflow-y-auto p-4 md:p-8">
           {loadingPage ? (
             <div className="flex justify-center pt-16"><Loader2 size={24} className="animate-spin" /></div>
-          ) : currentPage ? (
+          ) : currentPage && selectedBookId ? (
             <WikiPageComponent
               page={currentPage}
+              bookId={selectedBookId}
+              upToChapter={(() => {
+                const seriesData = seriesList.find(s => s.id === id)
+                if (!seriesData) return globalChapter
+                let offset = 0
+                for (const bid of seriesData.book_order) {
+                  if (bid === selectedBookId) break
+                  offset += books.find(b => b.id === bid)?.total_chapters ?? 0
+                }
+                return Math.max(1, globalChapter - offset)
+              })()}
               onNavigate={handleNavigate}
               visibleSlugs={pages ? new Set([
                 ...pages.summaries.map(p => p.slug),
@@ -183,6 +194,7 @@ export default function SeriesWiki() {
               onDelete={() => {}}
               onMerge={() => {}}
               onEdit={handleEditPage}
+              onRegenerate={(content) => setCurrentPage(prev => prev ? { ...prev, content_markdown: content } : null)}
               merging={false}
             />
           ) : (
