@@ -192,10 +192,10 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
                 <button
                   onClick={handleRegenerate}
                   title="Regenerate from source chapters"
-                  className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg border border-parchment-300 text-ink-muted hover:border-amber-300 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                  className="flex items-center gap-1 p-1.5 md:px-2 md:py-1 text-xs rounded-lg border border-parchment-300 text-ink-muted hover:border-amber-300 hover:text-amber-600 hover:bg-amber-50 transition-colors"
                 >
                   <RefreshCw size={11} />
-                  Regenerate
+                  <span className="hidden md:inline">Regenerate</span>
                 </button>
               )}
 
@@ -215,12 +215,12 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
                     onClick={() => setShowMergePicker(v => !v)}
                     title="Merge with another page"
                     disabled={merging}
-                    className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg border border-parchment-300 text-ink-muted hover:border-parchment-400 hover:text-ink transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1 p-1.5 md:px-2 md:py-1 text-xs rounded-lg border border-parchment-300 text-ink-muted hover:border-parchment-400 hover:text-ink transition-colors disabled:opacity-40"
                   >
                     {merging
                       ? <Loader2 size={11} className="animate-spin" />
                       : <GitMerge size={11} />}
-                    {merging ? 'Merging…' : 'Merge'}
+                    <span className="hidden md:inline">{merging ? 'Merging…' : 'Merge'}</span>
                   </button>
 
                   {showMergePicker && !merging && (
@@ -253,12 +253,12 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
                     onClick={() => setShowRetypePicker(v => !v)}
                     title="Change entity type"
                     disabled={retyping}
-                    className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg border border-parchment-300 text-ink-muted hover:border-parchment-400 hover:text-ink transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1 p-1.5 md:px-2 md:py-1 text-xs rounded-lg border border-parchment-300 text-ink-muted hover:border-parchment-400 hover:text-ink transition-colors disabled:opacity-40"
                   >
                     {retyping
                       ? <Loader2 size={11} className="animate-spin" />
                       : <ArrowRightLeft size={11} />}
-                    {retyping ? 'Moving…' : 'Move to'}
+                    <span className="hidden md:inline">{retyping ? 'Moving…' : 'Move to'}</span>
                   </button>
 
                   {showRetypePicker && !retyping && (
