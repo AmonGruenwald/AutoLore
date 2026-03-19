@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Link2, Trash2, GitMerge, X, Loader2, Pencil, Check, RefreshCw, ArrowRightLeft } from 'lucide-react'
@@ -15,7 +16,7 @@ interface Props {
   sameTypePages: WikiPageSummary[]   // other pages of same type for merge picker
   onDelete: () => void
   onMerge: (targetSlug: string) => void
-  onEdit: (title: string, content: string) => Promise<void>
+  onEdit: (title: string, content: string, aliases: string[]) => Promise<void>
   onRetype: (newType: string) => Promise<void>
   onRegenerate: (content: string) => void
   merging: boolean
@@ -46,6 +47,8 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
   const [saving, setSaving] = useState(false)
   const [editTitle, setEditTitle] = useState(page.title)
   const [editContent, setEditContent] = useState(page.content_markdown)
+  const [editAliases, setEditAliases] = useState<string[]>(page.aliases ?? [])
+  const [aliasInput, setAliasInput] = useState('')
   const [regenerating, setRegenerating] = useState(false)
   const [regenerateProgress, setRegenerateProgress] = useState<{ current: number; total: number } | null>(null)
   const [streamingContent, setStreamingContent] = useState<string | null>(null)
@@ -60,6 +63,8 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
     setSaving(false)
     setEditTitle(page.title)
     setEditContent(page.content_markdown)
+    setEditAliases(page.aliases ?? [])
+    setAliasInput('')
     setRegenerating(false)
     setRegenerateProgress(null)
     setStreamingContent(null)
@@ -90,7 +95,7 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
   async function handleSave() {
     setSaving(true)
     try {
-      await onEdit(editTitle.trim() || page.title, editContent)
+      await onEdit(editTitle.trim() || page.title, editContent, editAliases)
       setEditing(false)
     } finally {
       setSaving(false)
@@ -101,6 +106,23 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
     setEditing(false)
     setEditTitle(page.title)
     setEditContent(page.content_markdown)
+    setEditAliases(page.aliases ?? [])
+    setAliasInput('')
+  }
+
+  function handleAddAlias() {
+    const slug = slugify(aliasInput)
+    if (slug && !editAliases.includes(slug)) {
+      setEditAliases(prev => [...prev, slug])
+    }
+    setAliasInput('')
+  }
+
+  function handleAliasKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      handleAddAlias()
+    }
   }
 
   async function handleRegenerate() {
@@ -179,7 +201,7 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
 
               {/* Edit */}
               <button
-                onClick={() => { setEditTitle(page.title); setEditContent(page.content_markdown); setEditing(true) }}
+                onClick={() => { setEditTitle(page.title); setEditContent(page.content_markdown); setEditAliases(page.aliases ?? []); setAliasInput(''); setEditing(true) }}
                 title="Edit page"
                 className="p-1.5 rounded-lg border border-parchment-200 text-ink-muted hover:bg-parchment-100 hover:border-parchment-300 hover:text-ink transition-colors"
               >
@@ -321,17 +343,65 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
         </div>
 
         {editing ? (
-          <input
-            value={editTitle}
-            onChange={e => setEditTitle(e.target.value)}
-            className="w-full text-2xl font-bold text-ink bg-transparent border-0 border-b-2 border-parchment-300 focus:border-amber-400 focus:outline-none pb-1"
-            style={{ fontFamily: 'Georgia, serif' }}
-            placeholder="Page title"
-          />
+          <>
+            <input
+              value={editTitle}
+              onChange={e => setEditTitle(e.target.value)}
+              className="w-full text-2xl font-bold text-ink bg-transparent border-0 border-b-2 border-parchment-300 focus:border-amber-400 focus:outline-none pb-1"
+              style={{ fontFamily: 'Georgia, serif' }}
+              placeholder="Page title"
+            />
+            <div className="mt-3">
+              <p className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted mb-1.5">Aliases</p>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {editAliases.map(alias => (
+                  <span key={alias} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-parchment-100 border border-parchment-300 text-ink-muted">
+                    {alias}
+                    <button
+                      type="button"
+                      onClick={() => setEditAliases(prev => prev.filter(a => a !== alias))}
+                      className="hover:text-red-500 transition-colors"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  value={aliasInput}
+                  onChange={e => setAliasInput(e.target.value)}
+                  onKeyDown={handleAliasKeyDown}
+                  placeholder="Add alias…"
+                  className="flex-1 text-xs px-2 py-1 border border-parchment-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-amber-400"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddAlias}
+                  disabled={!aliasInput.trim()}
+                  className="px-2 py-1 text-xs rounded-lg border border-parchment-300 text-ink-muted hover:bg-parchment-100 disabled:opacity-40 transition-colors"
+                >
+                  Add
+                </button>
+              </div>
+              <p className="text-[10px] text-ink-muted/60 mt-1">Aliases let [[Character:OldName]] links resolve to this page.</p>
+            </div>
+          </>
         ) : (
-          <h1 className="text-2xl font-bold text-ink" style={{ fontFamily: 'Georgia, serif' }}>
-            {page.title}
-          </h1>
+          <>
+            <h1 className="text-2xl font-bold text-ink" style={{ fontFamily: 'Georgia, serif' }}>
+              {page.title}
+            </h1>
+            {page.aliases && page.aliases.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {page.aliases.map(alias => (
+                  <span key={alias} className="text-[11px] px-2 py-0.5 rounded-full bg-parchment-100 border border-parchment-200 text-ink-muted">
+                    {alias}
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 

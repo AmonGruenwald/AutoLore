@@ -171,9 +171,9 @@ export default function BookWiki() {
     }
   }
 
-  async function handleEditPage(title: string, content: string) {
+  async function handleEditPage(title: string, content: string, aliases: string[]) {
     if (!currentPage) return
-    const updated = await updateWikiPage(id, currentPage.slug, title, content, effectiveChapter)
+    const updated = await updateWikiPage(id, currentPage.slug, title, content, effectiveChapter, aliases)
     setCurrentPage(updated)
     if (updated.slug !== currentPage.slug) {
       setSelectedSlug(updated.slug)
