@@ -137,7 +137,7 @@ async def regenerate_wiki_page(
     api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
     model_row = db.query(Setting).filter_by(key="openrouter_model").first()
     api_key = api_key_row.value if api_key_row else ""
-    model = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+    model = model_row.value if model_row else "deepseek/deepseek-v3.2"
 
     if not api_key:
         raise HTTPException(400, "OpenRouter API key not configured")
@@ -262,7 +262,7 @@ async def merge_wiki_page(
     api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
     model_row   = db.query(Setting).filter_by(key="openrouter_model").first()
     api_key = api_key_row.value if api_key_row else ""
-    model   = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+    model   = model_row.value if model_row else "deepseek/deepseek-v3.2"
     if not api_key:
         raise HTTPException(400, "OpenRouter API key not configured")
 
@@ -524,7 +524,7 @@ async def update_wiki_page(
         api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
         model_row   = db.query(Setting).filter_by(key="openrouter_model").first()
         api_key = api_key_row.value if api_key_row else ""
-        model   = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+        model   = model_row.value if model_row else "deepseek/deepseek-v3.2"
 
         if api_key:
             try:
@@ -597,7 +597,7 @@ async def get_story_blurb(
     api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
     model_row = db.query(Setting).filter_by(key="openrouter_model").first()
     api_key = api_key_row.value if api_key_row else ""
-    model = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+    model = model_row.value if model_row else "deepseek/deepseek-v3.2"
 
     if not api_key:
         raise HTTPException(400, "No API key configured")
@@ -798,7 +798,7 @@ async def ask_question(book_id: int, req: AskRequest, db: Session = Depends(get_
     api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
     model_row = db.query(Setting).filter_by(key="openrouter_model").first()
     api_key = api_key_row.value if api_key_row else ""
-    model = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+    model = model_row.value if model_row else "deepseek/deepseek-v3.2"
 
     if not api_key:
         raise HTTPException(400, "No API key configured")

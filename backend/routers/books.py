@@ -22,7 +22,7 @@ def _get_api_settings(db: Session) -> tuple[str, str]:
     api_key_setting = db.query(Setting).filter_by(key="openrouter_api_key").first()
     model_setting = db.query(Setting).filter_by(key="openrouter_model").first()
     api_key = api_key_setting.value if api_key_setting else ""
-    model = model_setting.value if model_setting else "mistralai/mistral-7b-instruct"
+    model = model_setting.value if model_setting else "deepseek/deepseek-v3.2"
     return api_key, model
 
 

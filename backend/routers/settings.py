@@ -6,6 +6,7 @@ from database import Setting, get_db
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 AVAILABLE_MODELS = [
+    {"id": "deepseek/deepseek-v3.2", "name": "DeepSeek V3.2 (default)"},
     {"id": "mistralai/mistral-7b-instruct", "name": "Mistral 7B Instruct (fast, cheap)"},
     {"id": "mistralai/mixtral-8x7b-instruct", "name": "Mixtral 8x7B (balanced)"},
     {"id": "anthropic/claude-3-haiku", "name": "Claude 3 Haiku (fast)"},
@@ -31,7 +32,7 @@ def get_settings(db: Session = Depends(get_db)):
         "openrouter_api_key_hint": (
             "***" + api_key.value[-4:] if api_key and len(api_key.value) > 4 else ""
         ),
-        "openrouter_model": model.value if model else "mistralai/mistral-7b-instruct",
+        "openrouter_model": model.value if model else "deepseek/deepseek-v3.2",
         "available_models": AVAILABLE_MODELS,
     }
 
