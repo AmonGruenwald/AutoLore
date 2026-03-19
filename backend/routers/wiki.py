@@ -301,31 +301,39 @@ async def merge_wiki_page(
     new_slug = _slugify(merged["title"])
     if new_slug != old_slug:
         page_a.slug = new_slug
-        type_cap = page_a.page_type.capitalize()
-        old_link_text = f"[[{type_cap}:{old_title}]]"
-        new_link_text = f"[[{type_cap}:{merged['title']}]]"
 
-        other_versions = (
-            db.query(WikiPageVersion)
-            .join(WikiPage, WikiPageVersion.page_id == WikiPage.id)
-            .filter(WikiPage.book_id == book_id, WikiPage.id != page_a.id, WikiPage.id != page_b.id)
-            .all()
-        )
-        for v in other_versions:
-            dirty = False
+    type_cap = page_a.page_type.capitalize()
+    new_link_text = f"[[{type_cap}:{merged['title']}]]"
+
+    # Build the set of (old_link_text, old_slug) pairs that need rewriting in
+    # other pages: page_a's old title (if it changed) AND page_b's title.
+    rewrites: list[tuple[str, str]] = []
+    if new_slug != old_slug:
+        rewrites.append((f"[[{type_cap}:{old_title}]]", old_slug))
+    rewrites.append((f"[[{type_cap}:{page_b.title}]]", page_b.slug))
+
+    other_versions = (
+        db.query(WikiPageVersion)
+        .join(WikiPage, WikiPageVersion.page_id == WikiPage.id)
+        .filter(WikiPage.book_id == book_id, WikiPage.id != page_a.id, WikiPage.id != page_b.id)
+        .all()
+    )
+    for v in other_versions:
+        dirty = False
+        for old_link_text, old_slug_ref in rewrites:
             if v.content_markdown and old_link_text in v.content_markdown:
                 v.content_markdown = v.content_markdown.replace(old_link_text, new_link_text)
                 v.outgoing_links = resolve_links(v.content_markdown)
                 dirty = True
-            elif any(lk.get("slug") == old_slug for lk in (v.outgoing_links or [])):
+            elif any(lk.get("slug") == old_slug_ref for lk in (v.outgoing_links or [])):
                 v.outgoing_links = [
                     {**lk, "slug": new_slug, "text": merged["title"]}
-                    if lk.get("slug") == old_slug else lk
+                    if lk.get("slug") == old_slug_ref else lk
                     for lk in v.outgoing_links
                 ]
                 dirty = True
-            if dirty:
-                flag_modified(v, "outgoing_links")
+        if dirty:
+            flag_modified(v, "outgoing_links")
 
     # Store the absorbed page's slug as an alias so old links still resolve.
     # Also store page_a's old slug if the title (and thus slug) changed.
