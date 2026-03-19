@@ -345,6 +345,12 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                 entities_to_update.append({
                     "info": info,
                     "page": page,
+                    # Capture title/type from the page itself — authoritative source.
+                    # task["info"] may be stale (e.g. after a merge or alias resolution
+                    # mismatch), so using the page's own fields prevents generating
+                    # content for entity X and storing it under page Y.
+                    "page_title": page.title,
+                    "page_type": page.page_type,
                     "existing_content": _latest_version_content(page),
                 })
 
@@ -364,8 +370,8 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                         return await generate_entity_page(
                             api_key,
                             model,
-                            task["info"]["name"],
-                            task["info"]["type"],
+                            task["page_title"],
+                            task["page_type"],
                             summary_md,
                             story_chapter_idx,
                             task["existing_content"],
