@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from database import Book, WikiPage, WikiPageVersion, Series, Setting, get_db, SessionLocal
-import ai_service
+from database import Book, WikiPage, WikiPageVersion, Series, Setting, get_db, SessionLocal, WikiBlurb
+
 
 router = APIRouter(prefix="/api/wiki", tags=["wiki"])
 
@@ -230,8 +230,9 @@ async def merge_wiki_page(
     The source page (slug) is updated with the combined content; the
     target page (merge_with_slug) is deleted.  Returns the updated page.
     """
-    from ai_service import merge_wiki_pages as ai_merge
+    from ai_service import merge_wiki_pages as ai_merge, _slugify
     from wiki_builder import resolve_links
+    from sqlalchemy.orm.attributes import flag_modified
 
     if slug == body.merge_with_slug:
         raise HTTPException(400, "Cannot merge a page with itself")
@@ -257,16 +258,15 @@ async def merge_wiki_page(
         (min(v.first_visible_chapter for v in page_a.versions) if page_a.versions else 1),
         (min(v.first_visible_chapter for v in page_b.versions) if page_b.versions else 1),
     )
-    lvc = max(
-        (max(v.first_visible_chapter for v in page_a.versions) if page_a.versions else 1),
-        (max(v.first_visible_chapter for v in page_b.versions) if page_b.versions else 1),
-    )
 
     merged = await ai_merge(
         api_key, model,
         page_a.title, page_a.page_type, content_a,
         page_b.title, content_b,
     )
+
+    old_slug = page_a.slug
+    old_title = page_a.title
 
     # Replace all versions of page_a with a single merged version
     for v in list(page_a.versions):
@@ -282,6 +282,36 @@ async def merge_wiki_page(
     ))
     page_a.title = merged["title"]
 
+    # Keep slug in sync with title (same invariant as update_wiki_page)
+    new_slug = _slugify(page_a.page_type + "-" + merged["title"])
+    if new_slug != old_slug:
+        page_a.slug = new_slug
+        type_cap = page_a.page_type.capitalize()
+        old_link_text = f"[[{type_cap}:{old_title}]]"
+        new_link_text = f"[[{type_cap}:{merged['title']}]]"
+
+        other_versions = (
+            db.query(WikiPageVersion)
+            .join(WikiPage, WikiPageVersion.page_id == WikiPage.id)
+            .filter(WikiPage.book_id == book_id, WikiPage.id != page_a.id, WikiPage.id != page_b.id)
+            .all()
+        )
+        for v in other_versions:
+            dirty = False
+            if v.content_markdown and old_link_text in v.content_markdown:
+                v.content_markdown = v.content_markdown.replace(old_link_text, new_link_text)
+                v.outgoing_links = resolve_links(v.content_markdown)
+                dirty = True
+            elif any(lk.get("slug") == old_slug for lk in (v.outgoing_links or [])):
+                v.outgoing_links = [
+                    {**lk, "slug": new_slug, "text": merged["title"]}
+                    if lk.get("slug") == old_slug else lk
+                    for lk in v.outgoing_links
+                ]
+                dirty = True
+            if dirty:
+                flag_modified(v, "outgoing_links")
+
     # Delete the absorbed page
     db.delete(page_b)
     db.commit()
@@ -289,12 +319,13 @@ async def merge_wiki_page(
     # Return full page detail so the frontend can display it immediately
     db.refresh(page_a)
     return {
+        "id": page_a.id,
         "slug": page_a.slug,
         "title": page_a.title,
         "page_type": page_a.page_type,
         "content_markdown": merged["content"],
         "first_visible_chapter": fvc,
-        "last_updated_chapter": lvc,
+        "last_updated_chapter": fvc,
         "outgoing_links": links,
         "backlinks": [],
         "version_history": [{"chapter": fvc}],
@@ -346,15 +377,24 @@ async def update_wiki_page(
     target.content_markdown = body.content
     target.outgoing_links = new_links
     flag_modified(target, "outgoing_links")
+    # Enforce title uniqueness within the book (excluding this page)
+    if body.title != old_title:
+        conflict = db.query(WikiPage).filter(
+            WikiPage.book_id == book_id,
+            WikiPage.title == body.title,
+            WikiPage.id != page.id,
+        ).first()
+        if conflict:
+            raise HTTPException(400, f"A page with the title '{body.title}' already exists in this book")
+
     page.title = body.title
 
     # Slug is always derived from title — keep them in sync
-    new_slug = _slugify(page.page_type + "-" + body.title)
+    new_slug = _slugify(body.title)
     if new_slug != old_slug:
         page.slug = new_slug
-        type_cap = page.page_type.capitalize()
-        old_link_text = f"[[{type_cap}:{old_title}]]"
-        new_link_text = f"[[{type_cap}:{body.title}]]"
+        old_link_text = f"[[{old_title}]]"
+        new_link_text = f"[[{body.title}]]"
 
         # Rewrite every version in the book that references the old slug/title
         other_versions = (
@@ -431,6 +471,122 @@ async def update_wiki_page(
         "outgoing_links": new_links,
         "backlinks": _find_backlinks(db, book_id, page.slug, body.edit_chapter),
         "version_history": [{"chapter": v.first_visible_chapter} for v in all_versions],
+    }
+
+
+@router.get("/{book_id}/blurb")
+async def get_story_blurb(
+    book_id: int,
+    up_to_chapter: int,
+    force: bool = False,
+    db: Session = Depends(get_db),
+):
+    """
+    Return a short AI blurb describing where the story currently stands.
+    The blurb is cached in the database; pass ?force=true to regenerate it.
+    """
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+
+    # Return cached blurb if available and not forcing regeneration
+    if not force:
+        cached = db.query(WikiBlurb).filter_by(book_id=book_id, up_to_chapter=up_to_chapter).first()
+        if cached:
+            return {"blurb": cached.blurb}
+
+    api_key_row = db.query(Setting).filter_by(key="openrouter_api_key").first()
+    model_row = db.query(Setting).filter_by(key="openrouter_model").first()
+    api_key = api_key_row.value if api_key_row else ""
+    model = model_row.value if model_row else "mistralai/mistral-7b-instruct"
+
+    if not api_key:
+        raise HTTPException(400, "No API key configured")
+
+    # Collect summary pages visible at this chapter, sorted by chapter number
+    summary_pages = (
+        db.query(WikiPage)
+        .filter_by(book_id=book_id, page_type="summary")
+        .all()
+    )
+
+    recent: list[dict] = []
+    for page in summary_pages:
+        visible = [v for v in page.versions if v.first_visible_chapter <= up_to_chapter]
+        if not visible:
+            continue
+        latest = max(visible, key=lambda v: v.first_visible_chapter)
+        recent.append({
+            "number": latest.first_visible_chapter,
+            "title": page.title,
+            "content": latest.content_markdown,
+        })
+
+    recent.sort(key=lambda s: s["number"])
+    # Use up to the 3 most recent chapters for context
+    recent = recent[-3:]
+
+    if not recent:
+        return {"blurb": ""}
+
+    blurb = await ai_service.generate_story_blurb(api_key, model, recent, up_to_chapter)
+    blurb = blurb.strip()
+
+    # Store / update in cache
+    cached = db.query(WikiBlurb).filter_by(book_id=book_id, up_to_chapter=up_to_chapter).first()
+    if cached:
+        cached.blurb = blurb
+    else:
+        db.add(WikiBlurb(book_id=book_id, up_to_chapter=up_to_chapter, blurb=blurb))
+    db.commit()
+
+    return {"blurb": blurb}
+
+
+@router.get("/{book_id}/graph")
+def get_wiki_graph(book_id: int, up_to_chapter: int, db: Session = Depends(get_db)):
+    """
+    Returns nodes and edges for the character/entity connection graph.
+    Nodes = all wiki pages visible at up_to_chapter.
+    Edges = outgoing links between visible pages.
+    """
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+
+    pages = db.query(WikiPage).filter_by(book_id=book_id).all()
+
+    nodes = []
+    slug_to_latest = {}
+
+    for page in pages:
+        visible_versions = [v for v in page.versions if v.first_visible_chapter <= up_to_chapter]
+        if not visible_versions:
+            continue
+        fvc = min(v.first_visible_chapter for v in visible_versions)
+        latest = max(visible_versions, key=lambda v: v.first_visible_chapter)
+        nodes.append({
+            "id": page.slug,
+            "slug": page.slug,
+            "title": page.title,
+            "page_type": page.page_type,
+            "first_visible_chapter": fvc,
+        })
+        slug_to_latest[page.slug] = latest
+
+    visible_slugs = {n["id"] for n in nodes}
+
+    edge_set: set[tuple[str, str]] = set()
+    for slug, latest_version in slug_to_latest.items():
+        for link in (latest_version.outgoing_links or []):
+            target_slug = link.get("slug", "")
+            if target_slug in visible_slugs and slug != target_slug:
+                # Deduplicate undirected edges
+                edge_set.add((min(slug, target_slug), max(slug, target_slug)))
+
+    return {
+        "nodes": nodes,
+        "edges": [{"source": s, "target": t} for s, t in edge_set],
     }
 
 
