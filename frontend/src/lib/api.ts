@@ -227,6 +227,7 @@ export interface WikiPageSummary {
   page_type: string
   first_visible_chapter: number
   last_updated_chapter: number
+  aliases?: string[]
   book_id?: number
   book_title?: string
 }

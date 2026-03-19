@@ -11,6 +11,7 @@ interface Props {
   upToChapter: number
   onNavigate: (slug: string) => void
   visibleSlugs?: Set<string>
+  aliasToCanonical?: Map<string, string>
   sameTypePages: WikiPageSummary[]   // other pages of same type for merge picker
   onDelete: () => void
   onMerge: (targetSlug: string) => void
@@ -36,7 +37,7 @@ const TYPE_COLOR: Record<string, string> = {
 
 const ENTITY_TYPES = ['character', 'place', 'event'] as const
 
-export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibleSlugs, sameTypePages, onDelete, onMerge, onEdit, onRetype, onRegenerate, merging }: Props) {
+export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibleSlugs, aliasToCanonical, sameTypePages, onDelete, onMerge, onEdit, onRetype, onRegenerate, merging }: Props) {
   const [showMergePicker, setShowMergePicker] = useState(false)
   const [showRetypePicker, setShowRetypePicker] = useState(false)
   const [retyping, setRetyping] = useState(false)
@@ -72,11 +73,12 @@ export default function WikiPage({ page, bookId, upToChapter, onNavigate, visibl
       const colonIdx = raw.indexOf(':')
       const name = colonIdx !== -1 ? raw.slice(colonIdx + 1).trim() : raw.trim()
       const slug = slugify(name)
+      const canonicalSlug = aliasToCanonical?.get(slug) ?? slug
       const exists = visibleSlugs
-        ? visibleSlugs.has(slug)
+        ? (visibleSlugs.has(slug) || visibleSlugs.has(canonicalSlug))
         : (page.outgoing_links.find(l => l.slug === slug)?.exists ?? false)
       return exists
-        ? `[${name}](wiki:${slug})`
+        ? `[${name}](wiki:${canonicalSlug})`
         : name
     }
   )

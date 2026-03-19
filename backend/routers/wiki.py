@@ -35,6 +35,7 @@ def list_wiki_pages(book_id: int, up_to_chapter: int, db: Session = Depends(get_
             "page_type": page.page_type,
             "first_visible_chapter": min(v.first_visible_chapter for v in visible_versions),
             "last_updated_chapter": max(v.first_visible_chapter for v in visible_versions),
+            "aliases": list(page.aliases or []),
         }
 
         key = page.page_type + "s" if page.page_type != "summary" else "summaries"
