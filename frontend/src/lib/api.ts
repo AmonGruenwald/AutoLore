@@ -90,6 +90,12 @@ export const updateWikiPage = (bookId: number, slug: string, title: string, cont
     body: JSON.stringify({ title, content, edit_chapter: editChapter }),
   })
 
+export const retypeWikiPage = (bookId: number, slug: string, pageType: string) =>
+  request<{ id: number; slug: string; title: string; page_type: string }>(`/wiki/${bookId}/page/${slug}/retype`, {
+    method: 'POST',
+    body: JSON.stringify({ page_type: pageType }),
+  })
+
 export async function regenerateWikiPage(
   bookId: number,
   slug: string,

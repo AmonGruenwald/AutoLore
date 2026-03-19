@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight, Clock, MessageCircle, Network } from 'lucide-react'
-import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing, setStopChapter, deleteWikiPage, mergeWikiPages, updateWikiPage } from '../lib/api'
+import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing, setStopChapter, deleteWikiPage, mergeWikiPages, updateWikiPage, retypeWikiPage } from '../lib/api'
 import type { BookDetail, WikiPageList, WikiPageContent } from '../lib/api'
 import ChapterSlider from '../components/ChapterSlider'
 import WikiSidebar from '../components/WikiSidebar'
@@ -160,6 +160,13 @@ export default function BookWiki() {
     if (updated.slug !== currentPage.slug) {
       setSelectedSlug(updated.slug)
     }
+    loadPages()
+  }
+
+  async function handleRetypePage(newType: string) {
+    if (!currentPage) return
+    const updated = await retypeWikiPage(id, currentPage.slug, newType)
+    setCurrentPage(prev => prev ? { ...prev, page_type: updated.page_type } : null)
     loadPages()
   }
 
@@ -432,6 +439,7 @@ export default function BookWiki() {
                   onDelete={handleDeletePage}
                   onMerge={handleMergePage}
                   onEdit={handleEditPage}
+                  onRetype={handleRetypePage}
                   onRegenerate={(content) => setCurrentPage(prev => prev ? { ...prev, content_markdown: content } : null)}
                   merging={merging}
                 />

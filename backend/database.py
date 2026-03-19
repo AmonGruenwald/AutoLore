@@ -87,6 +87,7 @@ class WikiPage(Base):
     page_type = Column(String, nullable=False)  # summary|character|place|event
     slug = Column(String, nullable=False)  # url-safe identifier
     title = Column(String, nullable=False)
+    aliases = Column(JSON, default=list)  # old slugs that redirect to this page
 
     book = relationship("Book", back_populates="wiki_pages")
     versions = relationship(
@@ -143,6 +144,7 @@ def _run_migrations():
             blurb TEXT NOT NULL,
             UNIQUE(book_id, up_to_chapter)
         )""",
+        "ALTER TABLE wiki_pages ADD COLUMN aliases JSON DEFAULT '[]'",
     ]
     with engine.connect() as conn:
         for sql in migrations:
