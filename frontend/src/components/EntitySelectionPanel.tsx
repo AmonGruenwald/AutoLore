@@ -207,10 +207,19 @@ export default function EntitySelectionPanel({ bookId, entities, chapterNumber, 
                   {row.score}
                 </span>
 
-                {/* Type badge */}
-                <span className={`px-1.5 py-0.5 rounded border capitalize shrink-0 ${TYPE_COLORS[row.type] ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                {/* Type badge — click to cycle through types */}
+                <button
+                  onClick={() => {
+                    const types = ['character', 'place', 'event']
+                    const next = types[(types.indexOf(row.type) + 1) % types.length]
+                    updateRow(row.slug, { type: next, mergeIntoSlug: null })
+                    if (mergingSlug === row.slug) setMergingSlug(null)
+                  }}
+                  title="Click to change type"
+                  className={`px-1.5 py-0.5 rounded border capitalize shrink-0 transition-opacity hover:opacity-70 ${TYPE_COLORS[row.type] ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}
+                >
                   {row.type}
-                </span>
+                </button>
 
                 {/* Name (editable) */}
                 {editingName === row.slug ? (
