@@ -1,17 +1,24 @@
 """
 Wiki generation pipeline.
 
-Each call to build_wiki_for_book processes exactly ONE chapter, then
-sets generation_status to "waiting" (or "done" when all chapters are
-complete).  The caller is responsible for invoking it again for each
-subsequent chapter — either via the /continue endpoint (manual) or
-automatically from the frontend's auto-process toggle.
+build_wiki_for_book processes exactly ONE chapter up to the entity-selection
+pause, then sets generation_status to "waiting_entity_selection".  The user
+reviews and confirms the entity list via POST /confirm-entities, which calls
+resume_after_entity_selection to complete the chapter (generating wiki pages
+and advancing progress to "waiting" or "done").
 """
 import asyncio
 import re
 from sqlalchemy.orm import Session
 from database import Book, Chapter, WikiPage, WikiPageVersion, Setting
-from ai_service import generate_chapter_previews, generate_chapter_summary, generate_entity_page, resolve_entity_aliases, _slugify
+from ai_service import (
+    generate_chapter_previews,
+    generate_chapter_summary,
+    generate_entity_list,
+    generate_entity_page,
+    resolve_entity_aliases,
+    _slugify,
+)
 
 
 async def _get_settings(db: Session) -> tuple[str, str]:
@@ -198,13 +205,19 @@ async def generate_previews_for_book(book_id: int, db_factory) -> None:
 
 async def build_wiki_for_book(book_id: int, db_factory) -> None:
     """
-    Process the next unprocessed chapter for book_id.
+    Process the next unprocessed chapter for book_id up to the entity-selection
+    pause point.
 
-    Sets generation_status to "waiting" after each chapter so the user
-    can review before continuing, or "done" when all chapters are complete.
+    Flow:
+      1. Generate chapter summary (keeps AI conversation history)
+      2. Generate scored entity list in the same conversation
+      3. Resolve aliases automatically
+      4. Store the chapter summary wiki page
+      5. Persist pending entity list + conversation history to the Book row
+      6. Set generation_status = "waiting_entity_selection"
 
-    Invoke once the user has confirmed their chapter selection via
-    POST /api/books/{book_id}/confirm-selection.
+    The user then reviews the entity list via the frontend and calls
+    POST /confirm-entities, which triggers resume_after_entity_selection.
 
     db_factory: callable that returns a new SQLAlchemy Session.
     """
@@ -256,10 +269,8 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
         previous_summaries = _get_previous_summaries(db, book_id)
         entity_info = _get_entity_info(db, book_id)
 
-        # Chapters from the original book that were excluded by the user and fall
-        # between the previous story chapter and this one.  Their events may be
-        # referenced in the current chapter's text, so we tell the AI about them
-        # so it doesn't attribute those events to the wrong chapter.
+        # Chapters excluded by the user that fall between the previous story chapter
+        # and this one — their events may be referenced in the current chapter's text.
         prev_original_number = story_chapters[next_idx - 1].number if next_idx > 0 else 0
         skipped_between = [
             {"number": c.number, "title": c.title, "summary": c.one_sentence_summary}
@@ -275,7 +286,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             "raw_text": chapter.raw_text,
         }
 
-        # 1. Generate chapter summary
+        # 1. Generate chapter summary (returns conversation history for reuse)
         book.generation_step = f'Summarising chapter {chapter.number}: "{chapter.title}"'
         db.commit()
         try:
@@ -291,31 +302,44 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             return
 
         summary_md = result["summary"]
-        entities_in_chapter = result["entities"]
         ai_title = result.get("clean_title")
+        conversation_history: list[dict] = result.get("conversation_history", [])
         story_chapter_idx = next_idx + 1  # 1-based story chapter number (used for all versioning)
         clean_title = (ai_title or chapter.title) if _is_faulty_title(chapter.title, story_chapter_idx) else chapter.title
 
-        # Resolve aliases: ask the AI whether any new entities are nicknames /
-        # short forms of already-known entities, then patch the markdown.
-        new_entities = [e for e in entities_in_chapter if e["slug"] not in entity_info]
+        # 2. Generate scored entity list in the same conversation
+        book.generation_step = f'Identifying entities in chapter {chapter.number}…'
+        db.commit()
+        try:
+            scored_entities, conversation_history = await generate_entity_list(
+                api_key, model, conversation_history,
+                known_entities=entity_info if entity_info else None,
+            )
+        except Exception:
+            # Entity list generation is best-effort; fall back to the raw entities
+            # extracted from the summary if the dedicated call fails.
+            scored_entities = result.get("entities", [])
+
+        # 3. Resolve aliases: patch summary markdown and entity list so the user
+        #    sees canonical names rather than aliases.
+        new_entities = [e for e in scored_entities if e["slug"] not in entity_info]
         if new_entities and entity_info:
             try:
                 alias_map = await resolve_entity_aliases(
                     api_key, model, new_entities, entity_info, summary_md
                 )
                 if alias_map:
-                    entities_in_chapter, summary_md = _apply_alias_map(
-                        entities_in_chapter, summary_md, alias_map, entity_info
+                    scored_entities, summary_md = _apply_alias_map(
+                        scored_entities, summary_md, alias_map, entity_info
                     )
             except Exception:
-                pass  # alias resolution is best-effort; never block chapter processing
+                pass  # alias resolution is best-effort
 
         # Persist the AI-generated title on the chapter row
         chapter.clean_title = clean_title
         db.flush()
 
-        # Store summary page version
+        # 4. Store the chapter summary wiki page now (doesn't need entity confirmation)
         summary_page = _get_or_create_wiki_page(db, book_id, "summary", clean_title)
         links = resolve_links(summary_md)
         db.add(WikiPageVersion(
@@ -325,34 +349,127 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             outgoing_links=links,
         ))
 
-        # Track entity type/name for any new slugs seen
-        for entity in entities_in_chapter:
-            slug = entity["slug"]
-            if slug not in entity_info:
-                entity_info[slug] = {"type": entity["type"], "name": entity["name"]}
+        # 5. Persist pending data and pause for entity selection
+        book.pending_chapter_summary = summary_md
+        book.pending_entity_list = scored_entities
+        book.pending_conversation_history = conversation_history
+        book.generation_status = "waiting_entity_selection"
+        book.generation_step = None
+        db.commit()
+
+    except Exception as e:
+        db.rollback()
+        book = db.query(Book).filter_by(id=book_id).first()
+        if book:
+            book.generation_status = "error"
+            book.generation_error = str(e)
+            db.commit()
+    finally:
+        db.close()
+
+
+async def resume_after_entity_selection(
+    book_id: int,
+    selected_entities: list[dict],
+    db_factory,
+) -> None:
+    """
+    Resume chapter processing after the user has confirmed which entities to update.
+
+    selected_entities: list of dicts from the confirm-entities request, each with:
+      {type, name, slug, aliases (list), merge_into_slug (str|None)}
+
+    Uses the pending_conversation_history stored on the Book row so that entity
+    page generation continues in the same AI conversation as the chapter summary,
+    avoiding the need to re-send the full chapter text.
+    """
+    db: Session = db_factory()
+    try:
+        book = db.query(Book).filter_by(id=book_id).first()
+        if not book:
+            return
+        if book.generation_status != "waiting_entity_selection":
+            return
+
+        book.generation_status = "processing"
+        book.generation_step = "Applying entity selection…"
+        db.commit()
+
+        api_key, model = await _get_settings(db)
+
+        all_chapters = (
+            db.query(Chapter)
+            .filter_by(book_id=book_id)
+            .order_by(Chapter.number)
+            .all()
+        )
+        story_chapters = [c for c in all_chapters if c.is_story_chapter]
+        total = len(story_chapters)
+        next_idx = book.generation_progress
+        story_chapter_idx = next_idx + 1
+
+        summary_md: str = book.pending_chapter_summary or ""
+        conversation_history: list[dict] = book.pending_conversation_history or []
+
+        # Reconstruct entity_info for determining first-appearance
+        entity_info = _get_entity_info(db, book_id)
+
+        # Apply user renames and aliases before touching wiki pages
+        for sel in selected_entities:
+            new_aliases: list[str] = sel.get("aliases") or []
+            merge_into_slug: str | None = sel.get("merge_into_slug")
+
+            # If merging into an existing entity, redirect this entity's slug
+            if merge_into_slug:
+                target_page = db.query(WikiPage).filter_by(
+                    book_id=book_id, slug=merge_into_slug
+                ).first()
+                if target_page:
+                    # Treat the selected entity as an alias of the target
+                    aliases = list(target_page.aliases or [])
+                    if sel["slug"] not in aliases:
+                        aliases.append(sel["slug"])
+                    target_page.aliases = aliases
+                    db.flush()
+                    # Redirect slug for page lookup below
+                    sel = {**sel, "slug": merge_into_slug, "name": target_page.title, "type": target_page.page_type}
+
+            # Apply user-added aliases to the wiki page
+            if new_aliases:
+                page = _get_or_create_wiki_page(db, book_id, sel["type"], sel["name"])
+                existing = list(page.aliases or [])
+                for alias in new_aliases:
+                    alias_slug = _slugify(alias)
+                    if alias_slug not in existing:
+                        existing.append(alias_slug)
+                page.aliases = existing
+                db.flush()
 
         db.commit()
 
-        # 2. Determine which entities need a page update this chapter.
-        #    Always update on first appearance; skip "minor" mentions after that.
+        # Build the list of tasks for entity page generation
         entities_to_update = []
-        for entity in entities_in_chapter:
-            slug = entity["slug"]
-            info = entity_info[slug]
-            page = _get_or_create_wiki_page(db, book_id, info["type"], info["name"])
-            is_first_appearance = not page.versions
-            if is_first_appearance or entity.get("significance") != "minor":
-                entities_to_update.append({
-                    "info": info,
-                    "page": page,
-                    # Capture title/type from the page itself — authoritative source.
-                    # task["info"] may be stale (e.g. after a merge or alias resolution
-                    # mismatch), so using the page's own fields prevents generating
-                    # content for entity X and storing it under page Y.
-                    "page_title": page.title,
-                    "page_type": page.page_type,
-                    "existing_content": _latest_version_content(page),
-                })
+        for sel in selected_entities:
+            merge_into_slug: str | None = sel.get("merge_into_slug")
+            effective_slug = merge_into_slug if merge_into_slug else sel["slug"]
+            effective_name = sel["name"]
+            effective_type = sel["type"]
+
+            if merge_into_slug:
+                target_page = db.query(WikiPage).filter_by(
+                    book_id=book_id, slug=merge_into_slug
+                ).first()
+                if target_page:
+                    effective_name = target_page.title
+                    effective_type = target_page.page_type
+
+            page = _get_or_create_wiki_page(db, book_id, effective_type, effective_name)
+            entities_to_update.append({
+                "page": page,
+                "page_title": page.title,
+                "page_type": page.page_type,
+                "existing_content": _latest_version_content(page),
+            })
 
         db.commit()  # flush any new WikiPage rows before async section
 
@@ -361,7 +478,6 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             book.generation_step = f'Updating {n} entit{"y" if n == 1 else "ies"}…'
             db.commit()
 
-            # 3. Run all entity AI calls in parallel
             semaphore = asyncio.Semaphore(6)
 
             async def _call_update(task: dict) -> str | Exception:
@@ -375,18 +491,16 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                             summary_md,
                             story_chapter_idx,
                             task["existing_content"],
+                            conversation_history=conversation_history,
                         )
                     except Exception as exc:
                         return exc
 
             results = await asyncio.gather(*[_call_update(t) for t in entities_to_update])
 
-            # 4. Write results to DB sequentially
             for task, new_content in zip(entities_to_update, results):
                 if isinstance(new_content, Exception):
                     continue
-                # AI signals the entity was absent from this chapter's summary —
-                # skip rather than storing a refusal/error message as page content.
                 if new_content.strip().upper() == "SKIP" or not new_content.strip():
                     continue
                 links = resolve_links(new_content)
@@ -398,6 +512,11 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
                 ))
             db.commit()
 
+        # Clear pending data
+        book.pending_chapter_summary = None
+        book.pending_entity_list = None
+        book.pending_conversation_history = None
+
         new_progress = next_idx + 1
         book.generation_progress = new_progress
         book.generation_step = None
@@ -405,7 +524,7 @@ async def build_wiki_for_book(book_id: int, db_factory) -> None:
             book.generation_status = "done"
         elif book.stop_chapter is not None and new_progress >= book.stop_chapter:
             book.generation_status = "waiting"
-            book.stop_chapter = None  # clear so resuming works normally
+            book.stop_chapter = None
         else:
             book.generation_status = "waiting"
         db.commit()

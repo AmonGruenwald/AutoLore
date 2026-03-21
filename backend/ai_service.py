@@ -232,7 +232,10 @@ Output format:
     ]
 
     raw = await _call_openrouter(api_key, model, messages, max_tokens=2000)
-    return _parse_summary_response(raw, chapter["number"])
+    result = _parse_summary_response(raw, chapter["number"])
+    # Attach the full conversation history so callers can continue the context
+    result["conversation_history"] = messages + [{"role": "assistant", "content": raw}]
+    return result
 
 
 def _parse_summary_response(raw: str, chapter_number: int) -> dict:
@@ -276,6 +279,78 @@ def _parse_summary_response(raw: str, chapter_number: int) -> dict:
     return {"clean_title": clean_title, "summary": summary, "entities": entities, "chapter_number": chapter_number}
 
 
+async def generate_entity_list(
+    api_key: str,
+    model: str,
+    conversation_history: list[dict],
+    known_entities: dict[str, dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Continuing the existing chapter-summary conversation, ask the AI to produce a
+    scored list of all entities that appear in this chapter.
+
+    Returns (scored_entity_list, updated_conversation_history) where each entity is:
+      {"type": "character|place|event", "name": "...", "slug": "...", "score": 0-100, "significance": "major|minor"}
+
+    Score rubric:
+      90-100 — central to the chapter's plot
+      70-89  — actively participates in multiple scenes / significant dialogue or actions
+      50-69  — named and interactive, secondary role
+      30-49  — mentioned by name with minimal interaction
+      0-29   — passing reference only
+    """
+    known_str = ""
+    if known_entities:
+        by_type: dict[str, list[str]] = {}
+        for info in known_entities.values():
+            by_type.setdefault(info["type"], []).append(info["name"])
+        known_str = "\n\nAlready-known entities (already have wiki pages):\n" + "\n".join(
+            f"- {t.capitalize()}s: {', '.join(sorted(names))}"
+            for t, names in sorted(by_type.items())
+        )
+
+    prompt = f"""Now list ALL characters, places, and events that appear in this chapter — include both new and already-known ones.
+
+For each entity provide an importance score (0–100) reflecting how significant they were in THIS chapter specifically:
+- 90–100: Central to the chapter's plot (protagonist, key location, pivotal event)
+- 70–89: Actively participates in multiple scenes or has significant dialogue/actions
+- 50–69: Named and interactive, but secondary role
+- 30–49: Mentioned by name with minimal interaction
+- 0–29: Passing reference only
+{known_str}
+
+Respond with ONLY a valid JSON array, no other text:
+[{{"type": "character|place|event", "name": "ExactName", "slug": "exact-name", "score": 85, "significance": "major|minor"}}, ...]"""
+
+    messages = conversation_history + [{"role": "user", "content": prompt}]
+    raw = await _call_openrouter(api_key, model, messages, temperature=0.1, max_tokens=1200)
+
+    # Strip markdown fences if present
+    cleaned = re.sub(r"^```[a-z]*\n?", "", raw.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r"\n?```$", "", cleaned.strip(), flags=re.MULTILINE)
+
+    # Find JSON array
+    array_match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+    entities: list[dict] = []
+    if array_match:
+        try:
+            raw_list = json.loads(array_match.group())
+            for e in raw_list:
+                if "type" in e and "name" in e:
+                    entities.append({
+                        "type": e["type"].lower(),
+                        "name": e["name"],
+                        "slug": e.get("slug") or _slugify(e["name"]),
+                        "score": max(0, min(100, int(e.get("score", 50)))),
+                        "significance": e.get("significance", "major").lower(),
+                    })
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    updated_history = messages + [{"role": "assistant", "content": raw}]
+    return entities, updated_history
+
+
 async def generate_entity_page(
     api_key: str,
     model: str,
@@ -284,10 +359,18 @@ async def generate_entity_page(
     chapter_summary: str,
     chapter_number: int,
     existing_content: str = "",
+    conversation_history: list[dict] | None = None,
 ) -> str:
     """
-    Incrementally update an entity wiki page using only the current chapter summary
-    and the existing page content.  No raw chapter text is sent.
+    Incrementally update an entity wiki page.
+
+    When conversation_history is provided (new flow), the prompt is appended to
+    the existing chapter-summary conversation so the AI already has full chapter
+    context — no need to re-send the chapter summary text.
+
+    When conversation_history is None (legacy / regeneration path), a fresh
+    messages list is built using chapter_summary as context.
+
     Returns updated markdown content with [[Name]] links.
     """
     type_instructions = {
@@ -343,10 +426,14 @@ Extract ONLY information about "{entity_name}" and write a wiki page covering: {
 - IMPORTANT: If "{entity_name}" is not mentioned anywhere in the chapter summary, output
   exactly the single word: SKIP"""
 
-    messages = [
-        {"role": "system", "content": GROUNDING_SYSTEM},
-        {"role": "user", "content": prompt},
-    ]
+    if conversation_history is not None:
+        # Continue the existing conversation — the AI already has the chapter in context
+        messages = conversation_history + [{"role": "user", "content": prompt}]
+    else:
+        messages = [
+            {"role": "system", "content": GROUNDING_SYSTEM},
+            {"role": "user", "content": prompt},
+        ]
 
     return await _call_openrouter(api_key, model, messages, max_tokens=800)
 

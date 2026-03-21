@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, AlertCircle, Loader2, Trash2, Menu, ChevronRight, Clock, MessageCircle, Network } from 'lucide-react'
 import { getBook, getWikiPages, getWikiPage, deleteBook, continueProcessing, setStopChapter, deleteWikiPage, mergeWikiPages, updateWikiPage, retypeWikiPage } from '../lib/api'
 import type { BookDetail, WikiPageList, WikiPageContent } from '../lib/api'
+import EntitySelectionPanel from '../components/EntitySelectionPanel'
 import ChapterSlider from '../components/ChapterSlider'
 import WikiSidebar from '../components/WikiSidebar'
 import WikiPageComponent from '../components/WikiPage'
@@ -43,7 +44,8 @@ export default function BookWiki() {
 
   useEffect(() => {
     if (!book) return
-    if (book.generation_status !== 'processing' && book.generation_status !== 'waiting') return
+    const active = ['processing', 'waiting', 'waiting_entity_selection']
+    if (!active.includes(book.generation_status)) return
     const interval = setInterval(() => {
       getBook(id).then(updated => {
         setBook(prev => {
@@ -75,7 +77,8 @@ export default function BookWiki() {
   const effectiveChapter = Math.min(chapter, Math.max(1, maxChapter))
 
   const canBrowse = book &&
-    (book.generation_status === 'done' || book.generation_status === 'processing' || book.generation_status === 'waiting') &&
+    (book.generation_status === 'done' || book.generation_status === 'processing' ||
+     book.generation_status === 'waiting' || book.generation_status === 'waiting_entity_selection') &&
     maxChapter >= 1
 
   const loadPages = useCallback(() => {
@@ -208,6 +211,7 @@ export default function BookWiki() {
 
   const isProcessing = book.generation_status === 'processing'
   const isWaiting = book.generation_status === 'waiting'
+  const isEntitySelection = book.generation_status === 'waiting_entity_selection'
   const isPendingOrError = book.generation_status === 'pending' || book.generation_status === 'error'
 
   // Is the selected page known but not yet visible at this chapter?
@@ -238,7 +242,7 @@ export default function BookWiki() {
             <h1 className="font-semibold text-sm leading-tight truncate">{book.title}</h1>
             {book.author && <p className="text-xs text-ink-muted truncate">{book.author}</p>}
           </div>
-          {!isProcessing && <GenerationStatus book={book} />}
+          {!isProcessing && !isEntitySelection && <GenerationStatus book={book} />}
           {canBrowse && (
             <>
               <button
@@ -283,6 +287,22 @@ export default function BookWiki() {
             Processing chapter {book.generation_progress + 1} of {book.total_chapters}
             {book.generation_step && <span className="text-ink-muted/70"> · {book.generation_step}</span>}
           </span>
+        </div>
+      )}
+
+      {/* Entity selection panel */}
+      {isEntitySelection && book.pending_entity_list && book.pending_entity_list.length > 0 && (
+        <EntitySelectionPanel
+          bookId={id}
+          entities={book.pending_entity_list}
+          chapterNumber={book.generation_progress + 1}
+          onConfirmed={() => getBook(id).then(setBook)}
+        />
+      )}
+      {isEntitySelection && (!book.pending_entity_list || book.pending_entity_list.length === 0) && (
+        <div className="px-4 md:px-6 py-1.5 border-b border-parchment-200 flex items-center gap-2 text-xs text-ink-muted shrink-0">
+          <Loader2 size={11} className="animate-spin shrink-0 text-amber-600" />
+          <span>Identifying entities…</span>
         </div>
       )}
 

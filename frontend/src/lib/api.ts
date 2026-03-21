@@ -23,6 +23,21 @@ export const regenerateWiki = (id: number) =>
 export const continueProcessing = (id: number) =>
   request(`/books/${id}/continue`, { method: 'POST' })
 
+export const confirmEntities = (
+  id: number,
+  entities: {
+    type: string
+    name: string
+    slug: string
+    aliases: string[]
+    merge_into_slug: string | null
+  }[],
+) =>
+  request(`/books/${id}/confirm-entities`, {
+    method: 'POST',
+    body: JSON.stringify({ entities }),
+  })
+
 export const getChapters = (id: number) =>
   request<ChapterList>(`/books/${id}/chapters`)
 
@@ -189,17 +204,26 @@ export interface ChapterList {
   chapters: ChapterPreview[]
 }
 
+export interface PendingEntity {
+  type: string
+  name: string
+  slug: string
+  score: number
+  significance: string
+}
+
 export interface Book {
   id: number
   title: string
   author: string
   total_chapters: number
-  generation_status: 'selecting' | 'pending' | 'processing' | 'waiting' | 'done' | 'error'
+  generation_status: 'selecting' | 'pending' | 'processing' | 'waiting' | 'waiting_entity_selection' | 'done' | 'error'
   generation_progress: number
   generation_step: string | null
   series_id: number | null
   series_order: number | null
   stop_chapter: number | null
+  pending_entity_list: PendingEntity[] | null
   created_at: string
 }
 

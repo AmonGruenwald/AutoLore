@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from database import Book, Chapter, Series, Setting, WikiPage, get_db, SessionLocal
 from epub_parser import parse_epub
 from duplicate_detector import compute_hash, find_duplicate
-from wiki_builder import build_wiki_for_book, generate_previews_for_book
+from wiki_builder import build_wiki_for_book, generate_previews_for_book, resume_after_entity_selection
 
 router = APIRouter(prefix="/api/books", tags=["books"])
 
@@ -358,12 +358,54 @@ async def continue_processing(
     return {"ok": True}
 
 
+class ConfirmEntityItem(BaseModel):
+    type: str
+    name: str
+    slug: str
+    aliases: list[str] = []
+    merge_into_slug: str | None = None
+
+
+class ConfirmEntitiesBody(BaseModel):
+    entities: list[ConfirmEntityItem]
+
+
+@router.post("/{book_id}/confirm-entities")
+async def confirm_entities(
+    book_id: int,
+    body: ConfirmEntitiesBody,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Called after the user has reviewed and selected which entities to update.
+    Resumes wiki generation for the current chapter using the selected entities.
+    """
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+    if book.generation_status != "waiting_entity_selection":
+        raise HTTPException(400, f"Book is not awaiting entity selection (status: {book.generation_status})")
+
+    api_key, _ = _get_api_settings(db)
+    if not api_key:
+        raise HTTPException(400, "OpenRouter API key not configured")
+
+    entities_as_dicts = [e.model_dump() for e in body.entities]
+    background_tasks.add_task(_run_entity_resume, book_id, entities_as_dicts)
+    return {"ok": True}
+
+
 async def _run_previews(book_id: int):
     await generate_previews_for_book(book_id, _db_factory)
 
 
 async def _run_generation(book_id: int):
     await build_wiki_for_book(book_id, _db_factory)
+
+
+async def _run_entity_resume(book_id: int, selected_entities: list[dict]):
+    await resume_after_entity_selection(book_id, selected_entities, _db_factory)
 
 
 # --- Series endpoints ---
@@ -441,6 +483,7 @@ def _book_summary(book: Book) -> dict:
         "series_id": book.series_id,
         "series_order": book.series_order,
         "stop_chapter": book.stop_chapter,
+        "pending_entity_list": book.pending_entity_list,
         "created_at": book.created_at.isoformat() if book.created_at else None,
     }
 
