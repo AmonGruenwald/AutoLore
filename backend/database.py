@@ -53,11 +53,15 @@ class Book(Base):
     total_chapters = Column(Integer, default=0)
     series_id = Column(Integer, ForeignKey("series.id"), nullable=True)
     series_order = Column(Integer, nullable=True)  # position within series
-    generation_status = Column(String, default="pending")  # pending|processing|done|error
+    generation_status = Column(String, default="pending")  # pending|processing|waiting_entity_selection|waiting|done|error
     generation_progress = Column(Integer, default=0)  # chapters processed
     stop_chapter = Column(Integer, nullable=True)     # pause after this story-chapter index (1-based); None = no stop
     generation_step = Column(String, nullable=True)   # human-readable current step
     generation_error = Column(Text, nullable=True)
+    # Entity selection pending data (populated during waiting_entity_selection)
+    pending_chapter_summary = Column(Text, nullable=True)
+    pending_entity_list = Column(JSON, nullable=True)         # scored entity list awaiting user selection
+    pending_conversation_history = Column(JSON, nullable=True) # AI conversation history for entity page generation
     created_at = Column(DateTime, default=datetime.utcnow)
 
     series = relationship("Series", back_populates="books")
@@ -145,6 +149,9 @@ def _run_migrations():
             UNIQUE(book_id, up_to_chapter)
         )""",
         "ALTER TABLE wiki_pages ADD COLUMN aliases JSON DEFAULT '[]'",
+        "ALTER TABLE books ADD COLUMN pending_chapter_summary TEXT",
+        "ALTER TABLE books ADD COLUMN pending_entity_list JSON",
+        "ALTER TABLE books ADD COLUMN pending_conversation_history JSON",
     ]
     with engine.connect() as conn:
         for sql in migrations:

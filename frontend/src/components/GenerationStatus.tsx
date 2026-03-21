@@ -45,6 +45,15 @@ export default function GenerationStatus({ book }: { book: Book }) {
     )
   }
 
+  if (status === 'waiting_entity_selection') {
+    return (
+      <span className="flex items-center gap-1 text-xs text-amber-700 tabular-nums">
+        <ListChecks size={11} className="shrink-0" />
+        {progress}/{total_chapters} · pick entities
+      </span>
+    )
+  }
+
   if (status === 'processing') {
     const pct = total_chapters > 0 ? Math.round((progress / total_chapters) * 100) : 0
     return (
