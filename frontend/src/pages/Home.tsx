@@ -272,7 +272,7 @@ function BookCard({
   onDelete: () => void
   onRegenerate: () => void
 }) {
-  const canOpen = ['done', 'processing', 'waiting', 'selecting'].includes(book.generation_status)
+  const canOpen = ['done', 'processing', 'waiting', 'selecting', 'waiting_entity_selection'].includes(book.generation_status)
 
   return (
     <div className="bg-parchment-50 border border-parchment-200 rounded-xl p-4 flex flex-col gap-3 hover:border-parchment-400 transition-colors">
