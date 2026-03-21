@@ -12,6 +12,7 @@ interface EntityRow {
   selected: boolean
   aliases: string[]
   mergeIntoSlug: string | null  // slug of the entity this merges into
+  manual?: boolean              // added by the user manually
 }
 
 interface Props {
@@ -34,6 +35,12 @@ const SCORE_COLORS = (score: number) => {
 }
 
 const AUTO_SELECT_THRESHOLD = 70
+
+const ENTITY_TYPES = ['character', 'place', 'event'] as const
+
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
 
 export default function EntitySelectionPanel({ bookId, entities, chapterNumber, onConfirmed }: Props) {
   const [rows, setRows] = useState<EntityRow[]>(() =>
@@ -58,6 +65,11 @@ export default function EntitySelectionPanel({ bookId, entities, chapterNumber, 
   const [newAliasValue, setNewAliasValue] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  // Manual add form state
+  const [addName, setAddName] = useState('')
+  const [addType, setAddType] = useState<string>('character')
+  const [showAddForm, setShowAddForm] = useState(false)
 
   const updateRow = useCallback((slug: string, patch: Partial<EntityRow>) => {
     setRows(prev => prev.map(r => r.slug === slug ? { ...r, ...patch } : r))
@@ -119,6 +131,34 @@ export default function EntitySelectionPanel({ bookId, entities, chapterNumber, 
 
   function clearMerge(slug: string) {
     updateRow(slug, { mergeIntoSlug: null })
+  }
+
+  function commitAddEntity() {
+    const name = addName.trim()
+    if (!name) return
+
+    // Generate a unique slug — append a counter if there's a collision
+    let baseSlug = slugify(name) || 'entity'
+    let slug = baseSlug
+    let i = 2
+    while (rows.some(r => r.slug === slug)) {
+      slug = `${baseSlug}-${i++}`
+    }
+
+    const newRow: EntityRow = {
+      type: addType,
+      name,
+      slug,
+      score: 100,
+      significance: 'Manually added',
+      selected: true,
+      aliases: [],
+      mergeIntoSlug: null,
+      manual: true,
+    }
+    setRows(prev => [...prev, newRow])
+    setAddName('')
+    setShowAddForm(false)
   }
 
   async function handleConfirm() {
@@ -202,16 +242,21 @@ export default function EntitySelectionPanel({ bookId, entities, chapterNumber, 
                   className="accent-ink shrink-0"
                 />
 
-                {/* Score badge */}
-                <span className={`px-1.5 py-0.5 rounded border font-mono font-medium shrink-0 ${SCORE_COLORS(row.score)}`}>
-                  {row.score}
-                </span>
+                {/* Score badge — show "+" for manually added rows */}
+                {row.manual ? (
+                  <span className="px-1.5 py-0.5 rounded border font-mono font-medium shrink-0 bg-blue-50 text-blue-600 border-blue-200">
+                    +
+                  </span>
+                ) : (
+                  <span className={`px-1.5 py-0.5 rounded border font-mono font-medium shrink-0 ${SCORE_COLORS(row.score)}`}>
+                    {row.score}
+                  </span>
+                )}
 
                 {/* Type badge — click to cycle through types */}
                 <button
                   onClick={() => {
-                    const types = ['character', 'place', 'event']
-                    const next = types[(types.indexOf(row.type) + 1) % types.length]
+                    const next = ENTITY_TYPES[(ENTITY_TYPES.indexOf(row.type as typeof ENTITY_TYPES[number]) + 1) % ENTITY_TYPES.length]
                     updateRow(row.slug, { type: next, mergeIntoSlug: null })
                     if (mergingSlug === row.slug) setMergingSlug(null)
                   }}
@@ -317,6 +362,59 @@ export default function EntitySelectionPanel({ bookId, entities, chapterNumber, 
               </div>
             )
           })}
+
+          {/* Manual add form */}
+          {showAddForm ? (
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-dashed border-parchment-300 bg-white text-xs">
+              {/* Type selector */}
+              <select
+                value={addType}
+                onChange={e => setAddType(e.target.value)}
+                className={`px-1.5 py-0.5 rounded border capitalize shrink-0 focus:outline-none cursor-pointer ${TYPE_COLORS[addType] ?? ''}`}
+              >
+                {ENTITY_TYPES.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+
+              {/* Name input */}
+              <input
+                autoFocus
+                placeholder="Entity name…"
+                value={addName}
+                onChange={e => setAddName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') commitAddEntity()
+                  if (e.key === 'Escape') { setShowAddForm(false); setAddName('') }
+                }}
+                className="flex-1 min-w-24 px-1.5 py-0.5 border border-parchment-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white text-ink"
+              />
+
+              <button
+                onClick={commitAddEntity}
+                disabled={!addName.trim()}
+                className="flex items-center gap-1 px-2 py-0.5 rounded bg-ink text-parchment-100 hover:bg-ink-light disabled:opacity-40 transition-colors shrink-0"
+              >
+                <Check size={10} />
+                Add
+              </button>
+
+              <button
+                onClick={() => { setShowAddForm(false); setAddName('') }}
+                className="text-ink-muted hover:text-ink transition-colors"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="flex items-center gap-1.5 w-full px-2 py-1.5 rounded-lg border border-dashed border-parchment-200 text-xs text-ink-muted hover:text-ink hover:border-parchment-400 transition-colors"
+            >
+              <Plus size={11} />
+              Add entity manually
+            </button>
+          )}
         </div>
       </div>
     </div>
