@@ -309,12 +309,20 @@ async def generate_entity_list(
             for t, names in sorted(by_type.items())
         )
 
-    prompt = f"""Now list ALL characters, places, and events that appear in this chapter — include both new and already-known ones.
+    prompt = f"""Now produce a complete, exhaustive list of every character, place, and event that appears or is meaningfully mentioned in this chapter.
 
-For each entity provide an importance score (0–100) reflecting how significant they were in THIS chapter specifically:
-- 90–100: Central to the chapter's plot (protagonist, key location, pivotal event)
-- 70–89: Actively participates in multiple scenes or has significant dialogue/actions
-- 50–69: Named and interactive, but secondary role
+Rules:
+- Include EVERY named character — protagonists, antagonists, side characters, and anyone referred to by name, title, or nickname, even if they appear only briefly or in a single line of dialogue.
+- Include significant unnamed roles only if they play an active part (e.g. "The Guard" who speaks). Skip purely generic background crowds.
+- Include every named or described location used or referenced in the chapter.
+- Include significant events (battles, ceremonies, revelations, deaths) as entries of type "event".
+- Do NOT omit known entities — include them even if they already have wiki pages.
+- After your first pass, re-read the chapter summary mentally and ask yourself: "Did I miss anyone?" Add any you find.
+
+Score each entity 0–100 for importance in THIS chapter:
+- 90–100: Central to the chapter's plot
+- 70–89: Active participant across multiple scenes or with significant dialogue/actions
+- 50–69: Named and interactive, secondary role
 - 30–49: Mentioned by name with minimal interaction
 - 0–29: Passing reference only
 {known_str}
@@ -323,7 +331,7 @@ Respond with ONLY a valid JSON array, no other text:
 [{{"type": "character|place|event", "name": "ExactName", "slug": "exact-name", "score": 85, "significance": "major|minor"}}, ...]"""
 
     messages = conversation_history + [{"role": "user", "content": prompt}]
-    raw = await _call_openrouter(api_key, model, messages, temperature=0.1, max_tokens=1200)
+    raw = await _call_openrouter(api_key, model, messages, temperature=0.1, max_tokens=2500)
 
     # Strip markdown fences if present
     cleaned = re.sub(r"^```[a-z]*\n?", "", raw.strip(), flags=re.MULTILINE)
